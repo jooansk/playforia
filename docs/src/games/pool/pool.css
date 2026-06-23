@@ -2,7 +2,7 @@
 /* Page background = the green felt + cue sticks (bg-multi.jpg). NOTE: pool-bg.jpg is the
    applet PANEL background — it has a black rectangle baked in where the game sits, so it
    must NOT be stretched over the page (that black box is what shows up full-screen). */
-body { background: #0a3a14 url('../../../assets/res/APool/picture/bg-multi.jpg') center/cover no-repeat fixed;
+body { background: #0a3a14 url('../../../assets/res/APool/picture/bg-multi.jpg') center/cover no-repeat;
   display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; font-family: Arial, sans-serif; user-select: none; }
 /* ── Game wrapper ── */
 #game-wrap { display: flex; flex-direction: column; }

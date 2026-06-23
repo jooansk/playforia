@@ -168,7 +168,7 @@ window.addEventListener('pointerdown', () => {
 
 function loadImg(key, src, isMask) {
   const img = new Image();
-  img.onload = () => {
+  const finish = () => {
     if (isMask) {
       // Draw at the mask's NATIVE size (pool=620×330, snooker=600×330) so the
       // pixel grid matches that mode's TW; maskIs() indexes using the stored width.
@@ -177,13 +177,25 @@ function loadImg(key, src, isMask) {
       oc.width = w; oc.height = h;
       const ox = oc.getContext('2d');
       ox.drawImage(img, 0, 0);
-      try { imgs[key] = { d: ox.getImageData(0, 0, w, h).data, w, h }; } catch(e) {}
+      try {
+        const d = ox.getImageData(0, 0, w, h).data;
+        // A valid mask has GREEN "play" pixels. If the read came back blank (a cold-load
+        // decode race), leave imgs[key] unset → maskIs() uses the geometric fallback. A
+        // blank/all-black mask would otherwise classify every cushion as a pocket, so balls
+        // would vanish into the rails on the first game until a refresh warms the cache.
+        let ok = false;
+        for (let i = 0; i < d.length; i += 4) { if (d[i] < 64 && d[i + 1] > 128) { ok = true; break; } }
+        if (ok) imgs[key] = { d, w, h };
+      } catch (e) {}
     } else {
       imgs[key] = img;
     }
     if (++loaded >= NEED) start();
   };
   img.onerror = () => { if (++loaded >= NEED) start(); };
+  // Wait for a real DECODE (not just onload) before reading pixels / first draw — img.decode()
+  // guarantees the bitmap is ready, which onload does not.
+  img.onload = () => { (img.decode ? img.decode().catch(() => {}) : Promise.resolve()).then(finish); };
   img.src = src;
 }
 
@@ -2246,21 +2258,25 @@ function showMsg(txt,dur=2000){
 }
 
 // ─── MAIN LOOP & INIT ────────────────────────────────────────────────────────
+// Fixed-timestep accumulator: each stepPhysics() advances exactly 1/60 s of simulation, and
+// we run as many steps as REAL time has elapsed. So a shot always takes the same wall-clock
+// time and the balls move at the same speed regardless of frame rate — no slow motion on a
+// cold first load, and identical duration on every reload. The leftover fraction is banked
+// (no drift, unlike rounding per frame). Deterministic-safe for online lockstep (the total
+// step count to settle is unchanged).
+const SIM_DT = 1000 / 60;     // ms of simulation per stepPhysics() call
+let _simAcc = 0, _simLast = 0;
 function gameLoop() {
   const now = performance.now();
-  let dt = now - (gameLoop._last || now);
-  gameLoop._last = now;
-  if (dt > 100) dt = 100;   // cap catch-up after a long stall (cold load, tab hidden)
+  if (!_simLast) _simLast = now;
+  _simAcc += Math.min(now - _simLast, 250);   // cap banked time (avoid spiral after a stall)
+  _simLast = now;
 
   if (gState === S.SHOOT) {
-    // Advance the simulation at a CONSTANT real-time rate regardless of frame rate. Each
-    // stepPhysics() call is one 60fps "frame" of physics; on a slow frame we run several so
-    // shots don't play in slow motion on a cold first load. Deterministic-safe: the total
-    // step count to settle is unchanged, so online lockstep is unaffected.
-    const batches = Math.max(1, Math.round(dt / 16.667));
     let done = false;
-    for (let k = 0; k < batches && !done; k++) done = stepPhysics();
+    while (_simAcc >= SIM_DT && !done) { done = stepPhysics(); _simAcc -= SIM_DT; }
     if (done) {
+      _simAcc = 0;
       for (let i = 0; i < balls.length; i++) {
         if (balls[i].active && balls[i].falling) balls[i].active = false;
       }
@@ -2268,6 +2284,8 @@ function gameLoop() {
       awardShotProgress();   // classify the shot for badges/tokens BEFORE endTurn resets pocketed
       endTurn();
     }
+  } else {
+    _simAcc = 0;             // don't bank time while idle / aiming
   }
   render();
   requestAnimationFrame(gameLoop);
