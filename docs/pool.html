@@ -36,22 +36,22 @@
       <div class="gcard" title="9-Ball — pocket balls in order, sink the 9 to win">
         <img src="assets/res/APool/picture/lobbyselect/sp-1.png" class="gcard-img" alt="Pussitus">
         <div class="gcard-name">Pussitus</div>
-        <button class="aloita" onclick="startMode('9ball')">Aloita</button>
+        <button class="aloita" onclick="openCountPanel()">Aloita</button>
       </div>
-      <div class="gcard" title="10-Ball rotation — hit the lowest ball first">
+      <div class="gcard" title="Rotation — pot the balls in number order">
         <img src="assets/res/APool/picture/lobbyselect/sp-2.png" class="gcard-img" alt="Rotaatiopussitus">
         <div class="gcard-name">Rotaatiopussitus</div>
         <button class="aloita" onclick="startMode('10ball')">Aloita</button>
       </div>
-      <div class="gcard" title="Count to 99 points in the fewest shots">
+      <div class="gcard" title="Pot 99 balls in the fewest shots">
         <img src="assets/res/APool/picture/lobbyselect/sp-3.png" class="gcard-img" alt="Pussitus 99">
         <div class="gcard-name">Pussitus 99</div>
         <button class="aloita" onclick="startCount(99)">Aloita</button>
       </div>
-      <div class="gcard" title="Continuous potting — choose your target score">
+      <div class="gcard" title="Streak — pot a ball on every shot; one miss ends the run">
         <img src="assets/res/APool/picture/lobbyselect/sp-4.png" class="gcard-img" alt="Jatkumo">
         <div class="gcard-name">Jatkumo</div>
-        <button class="aloita" onclick="openCountPanel()">Aloita</button>
+        <button class="aloita" onclick="startMode('jatkumo')">Aloita</button>
       </div>
     </div>
 
@@ -108,14 +108,18 @@
   </div><!-- end #lobby -->
   <!-- Count mode target picker (full-canvas overlay) -->
   <div id="countPanel">
-    <div class="cp-title">COUNT MODE</div>
-    <div class="cp-sub">Pot every ball. Re-rack when 1 remains.<br>Each pot = 1 point — fewest shots wins.</div>
-    <div class="cp-label">Choose your target score</div>
-    <div style="display:flex;gap:14px;flex-wrap:wrap;justify-content:center">
-      <button class="cnt-btn" onclick="startCount(50)">50<span class="pts">points</span></button>
-      <button class="cnt-btn" onclick="startCount(75)">75<span class="pts">points</span></button>
-      <button class="cnt-btn" onclick="startCount(99)">99<span class="pts">points</span></button>
-      <button class="cnt-btn" onclick="startCount(147)">147<span class="pts">points</span></button>
+    <div class="cp-title">PUSSITUS</div>
+    <div class="cp-sub">Pot as many balls as you can in the fewest shots.<br>Re-rack when 1 remains. Foul (scratch): the potted ball goes back on the spot.</div>
+    <div class="cp-label">Choose how many balls</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;justify-content:center">
+      <button class="cnt-btn" onclick="startCount(7)">7<span class="pts">balls</span></button>
+      <button class="cnt-btn" onclick="startCount(10)">10<span class="pts">balls</span></button>
+      <button class="cnt-btn" onclick="startCount(15)">15<span class="pts">balls</span></button>
+      <button class="cnt-btn" onclick="startCount(20)">20<span class="pts">balls</span></button>
+      <button class="cnt-btn" onclick="startCount(25)">25<span class="pts">balls</span></button>
+      <button class="cnt-btn" onclick="startCount(50)">50<span class="pts">balls</span></button>
+      <button class="cnt-btn" onclick="startCount(75)">75<span class="pts">balls</span></button>
+      <button class="cnt-btn" onclick="startCount(99)">99<span class="pts">balls</span></button>
     </div>
     <button class="gobtn secondary" onclick="closeCountPanel()">&#8592; Back</button>
   </div>

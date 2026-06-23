@@ -60,6 +60,10 @@ let gameMode = 'hotseat'; // 'hotseat' | 'practice' | 'online' | 'count'
 let countPoints = 0;
 let countShots  = 0;
 let countTarget = 99;
+// Jatkumo (streak) state — pot a ball on every shot; a miss/scratch ends the run.
+let jatkumoStreak = 0;
+let jatkumoShots = 0;
+let jatkumoBest = (() => { try { return +(localStorage.getItem('pool-jatkumo-best') || 0); } catch (_) { return 0; } })();
 let snookerBreak = 0;
 let snookerScore = 0;
 let snookerShots = 0;
@@ -123,10 +127,11 @@ const Sound = {
     try {
       const AC = window.AudioContext || window.webkitAudioContext;
       this.ctx = new AC();
-      await Promise.all(this.NAMES.map(async n => {
+      for (const n of this.NAMES) {                    // decode ONE clip at a time (no CPU spike)
         const buf = await (await fetch(this.DIR + n + '.mp3')).arrayBuffer();
         this.buffers[n] = await this.ctx.decodeAudioData(buf);
-      }));
+        await new Promise(r => setTimeout(r, 0));       // yield to the render loop between clips
+      }
       this.ready = true;
     } catch (e) { console.warn('audio load failed', e); }
   },
@@ -153,9 +158,13 @@ const Sound = {
   pocket() { this._play('pocket', 0); },
   end(name) { this._play(name, 0); },
 };
-Sound.load();
-// AudioContext starts suspended until a user gesture (browser autoplay policy).
-window.addEventListener('pointerdown', () => Sound.resume());
+// Load audio only on the FIRST user gesture (also when the AudioContext may resume), so the
+// fetch/decode never competes with the first game's frame rate on a cold page load.
+let _audioStarted = false;
+window.addEventListener('pointerdown', () => {
+  if (!_audioStarted) { _audioStarted = true; Sound.load().then(() => Sound.resume()); }
+  else Sound.resume();
+});
 
 function loadImg(key, src, isMask) {
   const img = new Image();
@@ -657,6 +666,32 @@ function respotSnookerBall(id) {
   for (let x = sp.x - 1; x > BORDER + BALL_R; x--) if (tryPlaceSnooker(id, x, sp.y)) return;
 }
 
+// Foot/"8-ball" spot — centre of the rack (where the 8 sits). Balls picked up after a
+// foul are re-spotted here, or to the nearest free spot if it's occupied (Aapeli rule).
+const POOL_FOOT_X = 481, POOL_FOOT_Y = 165;
+function respotPool(id){
+  const b = balls[id];
+  const fits = (x,y) => {
+    if(x < BORDER+BALL_R || x > TW-BORDER-BALL_R || y < BORDER+BALL_R || y > TH-BORDER-BALL_R) return false;
+    for(let i=0;i<balls.length;i++){
+      if(i===id || !balls[i].active || balls[i].falling) continue;
+      const dx=balls[i].x-x, dy=balls[i].y-y;
+      if(dx*dx+dy*dy < BALL_D*BALL_D) return false;
+    }
+    return true;
+  };
+  let x=POOL_FOOT_X, y=POOL_FOOT_Y;
+  if(!fits(x,y)){                       // occupied → spiral outward to the first free spot
+    outer: for(let r=BALL_D; r<240; r+=4){
+      for(let a=0;a<360;a+=15){
+        const tx=POOL_FOOT_X+r*Math.cos(a*Math.PI/180), ty=POOL_FOOT_Y+r*Math.sin(a*Math.PI/180);
+        if(fits(tx,ty)){ x=tx; y=ty; break outer; }
+      }
+    }
+  }
+  b.x=x; b.y=y; b.vx=b.vy=0; b.active=true; b.falling=false; b.fp=0;
+}
+
 function resetGame(mode){
   if(mode) gameMode=mode;
   setGeometry(gameMode);   // swap table size / ball size / pockets for snooker vs pool
@@ -664,6 +699,7 @@ function resetGame(mode){
   balls=Array.from({length:ballCount},(_,i)=>mkBall(i));
   curP=0; group=[-1,-1]; winner=-1; freeBall=false;
   if(gameMode==='count'){ countPoints=0; countShots=0; }
+  if(gameMode==='jatkumo'){ jatkumoStreak=0; jatkumoShots=0; }
   if(gameMode==='9ball'||gameMode==='10ball'){ countShots=0; }
   if(gameMode==='snooker'){
     snookerBreak=0; snookerScore=0; snookerShots=0;
@@ -760,64 +796,89 @@ function rackPositions(count) {
   return pos;
 }
 
-// Re-rack for count mode: called when 1 numbered ball remains on the table.
-// Ball 1 is never re-racked so the apex position stays empty — easier break shot.
-function checkRerack(lastBall) {
-  const inZone = b => b.x >= RACK_ZONE.x1 && b.x <= RACK_ZONE.x2 &&
-                      b.y >= RACK_ZONE.y1 && b.y <= RACK_ZONE.y2;
+// Re-rack (Pussitus / Jatkumo):
+//   • ONE ball left (`lastBall`): it STAYS exactly where it is; the other 14 re-rack into
+//     the triangle WITHOUT the apex (top slot left empty).
+//   • ALL potted (`lastBall` null): all 15 re-rack into the full triangle (apex filled).
+function checkRerack(lastBall, status) {
+  const pos = rackPositions(15);   // pos[0] = apex (top), pos[1..14] = the rest
 
-  const lastInZone = inZone(lastBall) && lastBall.id !== 1;
-  const cueInZone  = balls[0].active && inZone(balls[0]);
-
-  // Balls 2-15 only — ball 1 (apex) stays potted to leave that position empty
-  const toRerack = balls.slice(2).filter(b => !b.active);
-
-  // Always use the full 15-ball triangle so the rack looks symmetric;
-  // pos[0] = apex — intentionally left empty (ball 1 never re-racked)
-  const pos = rackPositions(15);
-
-  if (lastInZone) {
-    // Last ball joins rack at pos[1]; rest follow
-    lastBall.x = pos[1].x; lastBall.y = pos[1].y;
-    lastBall.vx = lastBall.vy = 0;
-    toRerack.forEach((b, i) => {
-      b.x = pos[i + 2].x; b.y = pos[i + 2].y;
+  if (lastBall) {
+    const others = balls.slice(1).filter(b => b.id !== lastBall.id);   // the 14 non-remaining balls
+    others.forEach((b, i) => {
+      b.x = pos[i + 1].x; b.y = pos[i + 1].y;     // fill pos[1..14]; apex pos[0] stays empty
       b.vx = b.vy = 0; b.falling = false; b.fp = 0; b.active = true;
     });
+    // lastBall keeps its current position (already active where it stopped)
   } else {
-    // Last ball stays on table; re-rack fills from pos[1] (apex empty)
-    toRerack.forEach((b, i) => {
-      b.x = pos[i + 1].x; b.y = pos[i + 1].y;
+    balls.slice(1).forEach((b, i) => {            // full re-rack: all 15 into pos[0..14]
+      b.x = pos[i].x; b.y = pos[i].y;
       b.vx = b.vy = 0; b.falling = false; b.fp = 0; b.active = true;
     });
   }
-  // Ensure ball 1 stays inactive (apex slot always empty)
-  balls[1].active = false;
 
   pocketed = []; firstHit = -1; cueScratch = false;
 
+  // If the cue stopped inside the rack footprint it would be buried — hand it back.
+  const inZone = b => b.x >= RACK_ZONE.x1 && b.x <= RACK_ZONE.x2 &&
+                      b.y >= RACK_ZONE.y1 && b.y <= RACK_ZONE.y2;
+  const cueInZone = balls[0].active && inZone(balls[0]);
+  const info = status || `${countPoints}/${countTarget} pts · ${countShots} shots`;
   if (cueInZone) {
     balls[0].active = false;
     freeBall = true;
     gState = S.PLACE;
-    showMsg(`Re-rack! Ball in hand — ${countPoints}/${countTarget} pts`, 2000);
+    showMsg(`Re-rack! Ball in hand — ${info}`, 2000);
   } else {
     gState = balls[0].active ? S.AIM : S.PLACE;
-    showMsg(`Re-rack! ${countPoints}/${countTarget} pts · ${countShots} shots`, 2000);
+    showMsg(`Re-rack! ${info}`, 2000);
   }
   updateUI();
+}
+
+// End a Jatkumo run: persist the best streak and show the result.
+function endJatkumo(reason){
+  if(jatkumoStreak > jatkumoBest){
+    jatkumoBest = jatkumoStreak;
+    try { localStorage.setItem('pool-jatkumo-best', jatkumoBest); } catch(_){}
+  }
+  pocketed=[]; firstHit=-1; cueScratch=false;
+  winner=0; gState=S.DONE; updateUI();
+  showGameOver(`${reason} Streak ended.`,
+    `Streak: ${jatkumoStreak}  ·  Best: ${jatkumoBest}  ·  ${jatkumoShots} shot${jatkumoShots===1?'':'s'}`);
 }
 
 // ─── 8-BALL RULES ───────────────────────────────────────────────────────────
 function endTurn(){
   if(winner>=0) return;
 
-  // 9-ball / 10-ball: must hit lowest ball first; pocket the 9/10 to win
+  // 9-ball / 10-ball (Rotaatiopussitus): hit the lowest ball first; pocket the 9/10 to win.
   if(gameMode==='9ball' || gameMode==='10ball'){
     const targetBall = gameMode==='9ball' ? 9 : 10;
     countShots++;
 
-    // Win: target ball pocketed at any point (legally or on combination)
+    // The "ball on" is the lowest number that was on the table AT THE START of this shot —
+    // include balls potted this shot (they were active when struck). Computing it from the
+    // post-shot active set falsely fouls you for legally potting the on-ball.
+    const onNow = balls.slice(1, targetBall+1).filter(b => b.active).map(b => b.id);
+    const pottedLow = pocketed.filter(id => id >= 1 && id <= targetBall);
+    const lowestOn = Math.min(...onNow, ...pottedLow, Infinity);
+
+    // Foul: scratch, no contact, or hit something other than the on-ball first.
+    const foul = cueScratch || firstHit === -1 || firstHit !== lowestOn;
+
+    if(foul){
+      for(const id of pocketed) if(id >= 1) respotPool(id);   // foul + pot → ball goes back
+      const reason = cueScratch ? 'Scratch!'
+        : firstHit === -1 ? 'No contact — foul!'
+        : `Must hit the ${lowestOn}-ball first — foul!`;
+      showMsg(`${reason} Ball in hand.`, 2500);
+      freeBall=true; balls[0].active=false;
+      firstHit=-1; pocketed=[]; cueScratch=false;
+      gState=S.PLACE; updateUI(); return;
+    }
+
+    // Legal shot — win if the target ball dropped (directly or on a combination).
     if(pocketed.includes(targetBall)){
       gState=S.DONE; winner=0;
       updateUI();
@@ -826,27 +887,6 @@ function endTurn(){
         `Finished in ${countShots} shot${countShots===1?'':'s'}`
       );
       return;
-    }
-
-    // Determine lowest active numbered ball
-    const lowestActive = balls
-      .slice(1, targetBall + 1)
-      .filter(b => b.active)
-      .reduce((min, b) => b.id < min ? b.id : min, Infinity);
-
-    // Foul: scratch OR failed to hit the lowest ball first
-    const foul = cueScratch || (firstHit !== -1 && firstHit !== lowestActive) || firstHit === -1;
-
-    if(foul){
-      const reason = cueScratch
-        ? 'Scratch!'
-        : firstHit === -1
-          ? 'No contact — foul!'
-          : `Must hit the ${lowestActive}-ball first — foul!`;
-      showMsg(`${reason} Ball in hand.`, 2500);
-      freeBall=true; balls[0].active=false;
-      firstHit=-1; pocketed=[]; cueScratch=false;
-      gState=S.PLACE; updateUI(); return;
     }
 
     firstHit=-1; pocketed=[]; cueScratch=false;
@@ -952,11 +992,20 @@ function endTurn(){
     updateUI(); return;
   }
 
-  // Count mode — single player, every pot = 1 point, scratch = -1 point
+  // Count mode (Pussitus) — pot as many as possible in the fewest shots. Foul (scratch):
+  // any ball potted on the foul is picked back up onto the foot spot, not scored, −1 pt.
   if(gameMode==='count'){
-    countPoints += pocketed.length;
-    if(cueScratch) countPoints = Math.max(0, countPoints - 1);
     countShots++;
+    if(cueScratch){
+      for(const id of pocketed) if(id >= 1) respotPool(id);   // foul + pot → ball returns
+      countPoints = Math.max(0, countPoints - 1);
+      balls[0].active=false; freeBall=true;
+      showMsg(`Scratch! -1 pt — ${countPoints}/${countTarget}`, 1800);
+      pocketed=[]; firstHit=-1; cueScratch=false;
+      gState=S.PLACE; updateUI(); return;
+    }
+
+    countPoints += pocketed.length;
 
     // Win: reached target
     if(countPoints >= countTarget){
@@ -966,19 +1015,32 @@ function endTurn(){
       return;
     }
 
-    // Scratch: ball in hand, -1 point penalty already applied above
-    if(cueScratch){
-      balls[0].active=false; freeBall=true;
-      showMsg(`Scratch! -1 pt — ${countPoints}/${countTarget}`, 1800);
-    }
-
-    // Re-rack check: only 1 numbered ball left
+    // Re-rack when 1 ball remains (it stays, 14 re-rack apex-empty) or all are potted (full rack).
     const remaining=balls.slice(1).filter(b=>b.active);
-    if(remaining.length===1){
-      checkRerack(remaining[0]);
+    if(remaining.length<=1){
+      checkRerack(remaining.length===1 ? remaining[0] : null);
       return;
     }
 
+    pocketed=[]; firstHit=-1; cueScratch=false;
+    gState=balls[0].active?S.AIM:S.PLACE;
+    updateUI(); return;
+  }
+
+  // Jatkumo (streak) — every shot must legally pot a ball; a miss or scratch ends the run.
+  if(gameMode==='jatkumo'){
+    jatkumoShots++;
+    if(cueScratch){
+      for(const id of pocketed) if(id>=1) respotPool(id);   // foul + pot → ball returns
+      endJatkumo('Scratch — foul!'); return;
+    }
+    if(pocketed.length===0){ endJatkumo('Missed!'); return; }
+    jatkumoStreak += pocketed.length;
+    const remaining=balls.slice(1).filter(b=>b.active);
+    if(remaining.length<=1){                               // table runs low → re-rack to keep going
+      checkRerack(remaining.length===1 ? remaining[0] : null, `Streak: ${jatkumoStreak}`);
+      return;
+    }
     pocketed=[]; firstHit=-1; cueScratch=false;
     gState=balls[0].active?S.AIM:S.PLACE;
     updateUI(); return;
@@ -2137,6 +2199,18 @@ function updateUI(){
     return;
   }
 
+  if(gameMode==='jatkumo'){
+    p1.style.visibility='hidden'; p2.style.visibility='hidden';
+    if(gState===S.DONE){
+      s.textContent=`Streak ${jatkumoStreak} · Best ${jatkumoBest}`;
+    } else {
+      const placeLabel = freeBall?'Ball in hand':'Place behind head string';
+      const labels={[S.PLACE]:placeLabel,[S.AIM]:`Streak: ${jatkumoStreak}  ·  Best: ${jatkumoBest}  ·  pot every shot!`,[S.SHOOT]:'Shooting…'};
+      s.textContent=labels[gState]||'';
+    }
+    return;
+  }
+
   // Hotseat / Online: show both player panels
   p1.style.visibility=''; p2.style.visibility='';
   p1.classList.toggle('active', curP===0 && gState!==S.DONE);
@@ -2173,10 +2247,20 @@ function showMsg(txt,dur=2000){
 
 // ─── MAIN LOOP & INIT ────────────────────────────────────────────────────────
 function gameLoop() {
+  const now = performance.now();
+  let dt = now - (gameLoop._last || now);
+  gameLoop._last = now;
+  if (dt > 100) dt = 100;   // cap catch-up after a long stall (cold load, tab hidden)
+
   if (gState === S.SHOOT) {
-    const done = stepPhysics();
+    // Advance the simulation at a CONSTANT real-time rate regardless of frame rate. Each
+    // stepPhysics() call is one 60fps "frame" of physics; on a slow frame we run several so
+    // shots don't play in slow motion on a cold first load. Deterministic-safe: the total
+    // step count to settle is unchanged, so online lockstep is unaffected.
+    const batches = Math.max(1, Math.round(dt / 16.667));
+    let done = false;
+    for (let k = 0; k < batches && !done; k++) done = stepPhysics();
     if (done) {
-      // Deactivate fully-fallen balls
       for (let i = 0; i < balls.length; i++) {
         if (balls[i].active && balls[i].falling) balls[i].active = false;
       }
