@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>8-Ball Pool</title>
+<link rel="stylesheet" href="src/games/pool/pool.css">
+</head>
+<body>
+<!-- The shared chrome (info bar, side-panel, chat, MP controls) is built by GameShell;
+     pool supplies only the BOARD (canvas + its overlays) and the count-mode scoreboard.
+     A module bootstrap builds the shell, injects this board, then loads the classic
+     engine — so game.js still finds every element by id, unchanged. -->
+
+<!-- Board slot content: the felt canvas + all pool-specific overlays -->
+<template id="pool-board">
+  <canvas id="gc" width="620" height="330"></canvas>
+  <div id="msg"></div>
+  <!-- Lobby overlay -->
+  <div id="lobby">
+    <!-- Wood header bar: Yksinpelit | Valitse | Moninpelit -->
+    <div class="lobby-header">
+      <div class="ltab active" id="tabSP" onclick="showLobbyTab('sp')">Yksinpelit</div>
+      <div class="valitse">Valitse</div>
+      <div class="ltab" id="tabMP" onclick="showLobbyTab('mp')">Moninpelit</div>
+    </div>
+    <div class="lobby-title" id="lobbyTitle">Valitse yksinpeli:</div>
+
+    <!-- Single-player cards -->
+    <div class="lview active" id="spView">
+      <div class="gcard" title="Vapaa harjoittelu — pool or snooker, no rules">
+        <img src="assets/res/APool/picture/lobbyselect/sp-0.png" class="gcard-img" alt="Vapaa harjoittelu">
+        <div class="gcard-name">Vapaa harjoittelu</div>
+        <button class="aloita" onclick="startMode('practice')">Biljardi</button>
+        <button class="aloita alt" onclick="startMode('snooker')">Snooker</button>
+      </div>
+      <div class="gcard" title="9-Ball — pocket balls in order, sink the 9 to win">
+        <img src="assets/res/APool/picture/lobbyselect/sp-1.png" class="gcard-img" alt="Pussitus">
+        <div class="gcard-name">Pussitus</div>
+        <button class="aloita" onclick="startMode('9ball')">Aloita</button>
+      </div>
+      <div class="gcard" title="10-Ball rotation — hit the lowest ball first">
+        <img src="assets/res/APool/picture/lobbyselect/sp-2.png" class="gcard-img" alt="Rotaatiopussitus">
+        <div class="gcard-name">Rotaatiopussitus</div>
+        <button class="aloita" onclick="startMode('10ball')">Aloita</button>
+      </div>
+      <div class="gcard" title="Count to 99 points in the fewest shots">
+        <img src="assets/res/APool/picture/lobbyselect/sp-3.png" class="gcard-img" alt="Pussitus 99">
+        <div class="gcard-name">Pussitus 99</div>
+        <button class="aloita" onclick="startCount(99)">Aloita</button>
+      </div>
+      <div class="gcard" title="Continuous potting — choose your target score">
+        <img src="assets/res/APool/picture/lobbyselect/sp-4.png" class="gcard-img" alt="Jatkumo">
+        <div class="gcard-name">Jatkumo</div>
+        <button class="aloita" onclick="openCountPanel()">Aloita</button>
+      </div>
+    </div>
+
+    <!-- Multiplayer cards (game types: Kasapallo, Ysipallo, Pistepallo, Rotaatio, Snooker) -->
+    <div class="lview" id="mpView">
+      <div class="gcard" title="8-Ball — two players">
+        <img src="assets/res/APool/picture/lobbyselect/mp-0.png" class="gcard-img" alt="Kasapallo">
+        <div class="gcard-name">Kasapallo</div>
+        <button class="aloita" onclick="startMode('hotseat')">Vierustoveri</button>
+        <button class="aloita alt" id="onlineCard" onclick="openOnlinePanel()">Verkkopeli</button>
+        <div id="srvStatus">offline</div>
+      </div>
+      <div class="gcard dis" title="9-Ball — needs the multiplayer server">
+        <img src="assets/res/APool/picture/lobbyselect/mp-1.png" class="gcard-img" alt="Ysipallo">
+        <div class="gcard-name">Ysipallo</div>
+        <button class="aloita dis">Tulossa</button>
+      </div>
+      <div class="gcard dis" title="Point game — pot any ball for points (needs server)">
+        <img src="assets/res/APool/picture/lobbyselect/mp-2.png" class="gcard-img" alt="Pistepallo">
+        <div class="gcard-name">Pistepallo</div>
+        <button class="aloita dis">Tulossa</button>
+      </div>
+      <div class="gcard dis" title="Rotation — pot in order, score each ball's value (needs server)">
+        <img src="assets/res/APool/picture/lobbyselect/mp-3.png" class="gcard-img" alt="Rotaatio">
+        <div class="gcard-name">Rotaatio</div>
+        <button class="aloita dis">Tulossa</button>
+      </div>
+      <div class="gcard dis" title="Snooker — needs the multiplayer server">
+        <img src="assets/res/APool/picture/lobbyselect/mp-4.png" class="gcard-img" alt="Snooker">
+        <div class="gcard-name">Snooker</div>
+        <button class="aloita dis">Tulossa</button>
+      </div>
+    </div>
+
+    <!-- Aapeliranking legend -->
+    <div class="rank-bar">
+      <b>Aapeliranking</b>
+      <img src="assets/res/Shared/picture/ranking-icons.gif" alt="ranks">
+      <span class="rng">1–49 · 50–99 · 100–199 · 200–299 · 300–399 · 400–499 · 500–599 · 600+</span>
+    </div>
+
+    <!-- Online sub-panel (shown when Verkkopeli clicked) -->
+    <div id="onlinePanel">
+      <div style="color:#7ad;font-size:11px">Room: <strong id="myRoomCode" style="color:#9fe;letter-spacing:2px">—</strong></div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="joinCode" placeholder="ROOM CODE" maxlength="6">
+        <button class="opbtn" onclick="joinOnlineRoom()">Join</button>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="opbtn" onclick="createOnlineRoom()">Create Room</button>
+        <button class="opbtn secondary" onclick="closeOnlinePanel()">Back</button>
+      </div>
+    </div>
+  </div><!-- end #lobby -->
+  <!-- Count mode target picker (full-canvas overlay) -->
+  <div id="countPanel">
+    <div class="cp-title">COUNT MODE</div>
+    <div class="cp-sub">Pot every ball. Re-rack when 1 remains.<br>Each pot = 1 point — fewest shots wins.</div>
+    <div class="cp-label">Choose your target score</div>
+    <div style="display:flex;gap:14px;flex-wrap:wrap;justify-content:center">
+      <button class="cnt-btn" onclick="startCount(50)">50<span class="pts">points</span></button>
+      <button class="cnt-btn" onclick="startCount(75)">75<span class="pts">points</span></button>
+      <button class="cnt-btn" onclick="startCount(99)">99<span class="pts">points</span></button>
+      <button class="cnt-btn" onclick="startCount(147)">147<span class="pts">points</span></button>
+    </div>
+    <button class="gobtn secondary" onclick="closeCountPanel()">&#8592; Back</button>
+  </div>
+  <!-- Game-over overlay -->
+  <div id="game-over">
+    <div id="game-over-title">Game Over</div>
+    <div id="game-over-sub"></div>
+    <div style="display:flex;gap:10px;margin-top:8px;flex-wrap:wrap;justify-content:center">
+      <button class="gobtn" onclick="restartGame()">&#9654; Play Again</button>
+      <button id="gobtn-rack" class="gobtn secondary" onclick="enterRackMode()" style="display:none">&#8853; Place Balls</button>
+      <button class="gobtn secondary" onclick="showLobby()">&#9776; Lobby</button>
+    </div>
+  </div>
+  <!-- Rack-mode ball picker (bottom of canvas) -->
+  <div id="rack-panel">
+    <p>Click a ball to select it, then click on the table to place it.</p>
+    <div id="rack-balls-row"></div>
+    <div style="display:flex;gap:8px;margin-top:4px">
+      <button class="gobtn" onclick="finishRack()" style="font-size:11px;padding:5px 16px">&#9654; Done Placing</button>
+      <button class="gobtn secondary" onclick="clearRack()" style="font-size:11px;padding:5px 12px">Clear Table</button>
+    </div>
+  </div>
+  <!-- Player name setup overlay (first-time visit) -->
+  <div id="name-setup">
+    <h3>POOL</h3>
+    <p class="ns-sub">Choose a guest name to play.<br>Your name is saved in this browser.</p>
+    <input id="name-input" type="text" placeholder="Your name" maxlength="20" onkeydown="if(event.key==='Enter')saveName()">
+    <div style="display:flex;gap:10px">
+      <button class="gobtn" onclick="saveName()">Continue</button>
+    </div>
+    <p class="ns-fine">You will join as <strong style="color:#3a6a80">q+YourName</strong> (guest).<br>Leave blank for a random name.</p>
+  </div>
+</template>
+
+<!-- Footer slot content: count-mode scoreboard (pool-specific, below the chat row) -->
+<template id="pool-footer">
+  <div id="scoreboard">
+    <div id="sb-tabs">
+      <div class="sb-tab active" data-tab="alltime" onclick="showSbTab('alltime')">All Time</div>
+      <div class="sb-tab" data-tab="week" onclick="showSbTab('week')">This Week</div>
+      <div class="sb-tab" data-tab="today" onclick="showSbTab('today')">Today</div>
+      <div class="sb-tab" data-tab="mine" onclick="showSbTab('mine')">My Best</div>
+    </div>
+    <div id="sb-body"></div>
+  </div>
+</template>
+
+<script type="module">
+import { GameShell } from './src/platform/GameShell.js';
+import { Lobby } from './src/platform/Lobby.js';
+import * as Progression from './src/platform/progression.js';
+// Expose the shared challenge lobby to the classic engine (game.js opens it on Verkkopeli).
+window.PlatformLobby = Lobby;
+// Expose the progression/store layer (badges, tokens, assets) to the classic engine.
+window.Progression = Progression;
+// Build the shared chrome, inject pool's board + footer, then load the classic engine.
+GameShell.boot({
+  status: 'Pool',
+  boardHTML: document.getElementById('pool-board').innerHTML,
+  footer: document.getElementById('pool-footer').content.firstElementChild.cloneNode(true),
+  engineSrc: 'src/games/pool/game.js',
+});
+</script>
+</body>
+</html>

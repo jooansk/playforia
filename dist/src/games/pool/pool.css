@@ -1,0 +1,215 @@
+* { box-sizing: border-box; margin: 0; padding: 0; }
+/* Green felt = the Java game-panel background (SPanel_Sub20 setBackground("game_pool-bg")) */
+body { background: #0a3a14 url('../../../assets/res/APool/picture/game/pool-bg.jpg') center/cover no-repeat;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; font-family: Arial, sans-serif; user-select: none; }
+/* ── Game wrapper ── */
+#game-wrap { display: flex; flex-direction: column; }
+/* ── Top info bar (mimics SPanel_Sub34: player info area) ── */
+#infobar { background: #0c1e3a; width: 755px; height: 62px; display: flex; align-items: center;
+  padding: 0 8px; gap: 6px; border-bottom: 2px solid #1a3a60; }
+.pinfo { flex: 1; background: #091830; border: 1px solid #1a3a60; border-radius: 5px;
+  padding: 5px 10px; min-width: 0; transition: border-color .2s, background .2s; }
+.pinfo.active { border-color: #e94560; background: #1e0a18; }
+.pname { color: #7ad0f0; font-size: 13px; font-weight: bold; }
+.pgroup { color: #5a8aa0; font-size: 10px; margin-top: 2px; }
+#center-info { display: flex; flex-direction: column; align-items: center; gap: 5px; min-width: 200px; }
+#status { color: #c8dff0; font-size: 12px; font-weight: bold; text-align: center; }
+#backBtn { display: none; background: none; border: 1px solid #2a4a6a; color: #6a9ac0;
+  padding: 3px 10px; border-radius: 4px; cursor: pointer; font-size: 11px; }
+#backBtn:hover { background: #0f2a44; }
+/* ── Main row: canvas + side panel ── */
+#main-row { display: flex; }
+#canvas-wrap { position: relative; }
+canvas#gc { display: block; cursor: crosshair; }
+#msg { position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+  background: rgba(0,0,0,0.82); color: #fff; padding: 10px 22px; border-radius: 8px;
+  font-size: 15px; font-weight: bold; pointer-events: none; display: none; white-space: nowrap; }
+/* ── Right side panel (mimics Java x=630 side area) ── */
+/* Transparent so the felt shows behind the spin ball + viewers (matches the Java look) */
+#side-panel { width: 135px; background: rgba(6,20,12,0.34); border-left: 2px solid rgba(20,58,40,0.6);
+  display: flex; flex-direction: column; align-items: center; padding: 8px 6px 10px; gap: 6px; }
+#spinc { border: 1px solid #2a4060; cursor: crosshair; display: block; border-radius: 3px; }
+#spinlabel { color: #7a9ab0; font-size: 9px; text-align: center; }
+#hint { color: #4a6a80; font-size: 9px; text-align: center; line-height: 1.4; flex: 1; padding: 0 2px; }
+.spbtn { width: 100%; background: #0d2238; border: 1px solid #1e4060; color: #7ab; padding: 5px 4px;
+  border-radius: 4px; cursor: pointer; font-size: 11px; text-align: center; margin-top: 2px; }
+.spbtn:hover { background: #122a4a; border-color: #3a7acc; }
+#restartBtn { display: none; background: #1a0a2a; border: 1px solid #7a3a9a; color: #c88af0;
+  width: 100%; padding: 7px 4px; border-radius: 4px; cursor: pointer;
+  font-size: 12px; font-weight: bold; text-align: center; margin-top: 4px; }
+#restartBtn:hover { background: #2a1040; border-color: #a060cc; color: #e0b0ff; }
+/* ── Shot clock (Aika) in the top bar — multiplayer modes ── */
+#clock-wrap { display:none; flex-direction:column; align-items:center; gap:2px; }
+#clock-label { color:#c8a23a; font-size:9px; font-weight:bold; letter-spacing:2px; text-transform:uppercase; }
+#clock-box { display:flex; align-items:center; gap:7px; }
+#turn-arrow { color:#f0902a; font-size:16px; line-height:1; transition:transform .2s; }
+#turn-arrow.right { transform:scaleX(-1); }
+#shotClock { background:#1a0f04; border:1px solid #6a4010; border-radius:4px;
+  color:#ffb43a; font-family:'Courier New',monospace; font-size:18px; font-weight:bold;
+  padding:1px 9px; min-width:48px; text-align:center; box-shadow:inset 0 0 6px rgba(0,0,0,.6); }
+#shotClock.low { color:#ff5a3a; border-color:#a02810; }
+/* ── Side-panel multiplayer controls (Katsojat / toggles / Luovuta / Poistu) ── */
+#mp-controls { display:none; flex-direction:column; gap:4px; width:100%; }
+.katsojat-title { color:#7a9ab0; font-size:9px; text-transform:uppercase; letter-spacing:1px; text-align:center; }
+#katsojat { background:#05101c; border:1px solid #1a3a55; border-radius:3px;
+  height:50px; overflow-y:auto; font-size:10px; color:#8a9aaa; padding:3px 5px; }
+#katsojat .none { color:#3a5a6a; font-style:italic; }
+.toggle-row { display:flex; gap:10px; justify-content:center; font-size:10px; color:#8aa; margin-top:2px; }
+.toggle-row label { display:flex; align-items:center; gap:3px; cursor:pointer; }
+.spbtn.btn-luovuta { background:#0d3a14; border-color:#2a7a30; color:#9fe0a0; }
+.spbtn.btn-luovuta:hover { background:#155020; border-color:#3a9a40; }
+.spbtn.btn-poistu { background:#3a0d0d; border-color:#7a2a2a; color:#f0a0a0; }
+.spbtn.btn-poistu:hover { background:#501515; border-color:#a03a3a; }
+/* ── Lobby overlay — Playforia single-player style (covers the canvas area) ── */
+/* Game-selection overlay (covers the canvas area — NOT full screen).
+   Asset paths are relative to THIS file: src/games/pool/ → repo root is ../../../ */
+#lobby { position:absolute; top:0; left:0; width:100%; height:100%;
+  background:#0a3a14 url('../../../assets/res/APool/picture/bg-single.jpg') center/cover;
+  display:flex; flex-direction:column; align-items:center; justify-content:flex-start;
+  z-index:50; pointer-events:all; overflow:hidden; }
+/* Wood header bar with tabs (figure icons baked into header-0.png at the edges) */
+.lobby-header { width:100%; height:38px; flex:0 0 38px; position:relative;
+  background:url('../../../assets/res/APool/picture/lobbyselect/header-0.png') center/100% 100% no-repeat;
+  display:flex; align-items:center; justify-content:space-between;
+  padding:0 40px; box-sizing:border-box; }
+.ltab { color:#3a2410; font-size:13px; font-weight:900; cursor:pointer;
+  padding:3px 12px; border-radius:4px; letter-spacing:.5px;
+  text-shadow:0 1px 0 rgba(255,255,255,.25); transition:all .12s; }
+.ltab:hover { color:#1a1408; }
+.ltab.active { background:linear-gradient(#f4a828,#d06c00); color:#fff;
+  text-shadow:0 1px 1px rgba(0,0,0,.45); box-shadow:0 0 7px rgba(255,150,30,.7); }
+.valitse { position:absolute; left:50%; transform:translateX(-50%);
+  background:linear-gradient(#ffe575,#e0a400); color:#5a3000; font-size:11px;
+  font-weight:900; padding:3px 16px; border-radius:11px; border:1px solid #a06000;
+  box-shadow:0 1px 2px rgba(0,0,0,.4); letter-spacing:.5px; }
+/* Title under the bar */
+.lobby-title { color:#ffe8a0; font-size:16px; font-weight:900; margin:7px 0 4px;
+  text-shadow:0 1px 3px rgba(0,0,0,.75); letter-spacing:.5px; }
+/* Card rows (one per tab) */
+.lview { display:none; gap:8px; justify-content:center; align-items:flex-start;
+  flex:1; padding:2px 8px; }
+.lview.active { display:flex; }
+.gcard { display:flex; flex-direction:column; align-items:center; gap:4px; width:114px; }
+.gcard-img { width:84px; height:84px; border-radius:7px; border:2px solid #b8841f;
+  box-shadow:0 2px 6px rgba(0,0,0,.55); display:block; }
+.gcard.dis .gcard-img { filter:grayscale(.7) brightness(.6); }
+.gcard-name { color:#fff; font-size:11px; font-weight:700; text-align:center;
+  text-shadow:0 1px 2px rgba(0,0,0,.85); line-height:1.15; min-height:26px;
+  display:flex; align-items:center; }
+.aloita { background:linear-gradient(#5cc832,#2e8a10); color:#fff; border:1px solid #1f6608;
+  border-radius:4px; cursor:pointer; font-size:11px; font-weight:700; padding:3px 0;
+  width:92px; box-shadow:0 1px 2px rgba(0,0,0,.4); transition:filter .12s; }
+.aloita:hover { filter:brightness(1.15); }
+.aloita.alt { background:linear-gradient(#7fb4d8,#3f78a8); border-color:#2a5878; }
+.aloita.dis { background:linear-gradient(#8a8a8a,#5a5a5a); border-color:#444;
+  color:#cfcfcf; cursor:default; box-shadow:none; }
+.aloita.dis:hover { filter:none; }
+/* Bottom ranking legend */
+.rank-bar { width:100%; flex:0 0 22px; background:rgba(0,0,0,.55);
+  display:flex; align-items:center; gap:8px; padding:0 10px; box-sizing:border-box;
+  font-size:9px; color:#cdd; }
+.rank-bar b { color:#ffd060; font-weight:800; letter-spacing:.5px; }
+.rank-bar img { height:11px; image-rendering:pixelated; }
+.rank-bar .rng { color:#9ab; }
+/* Online sub-panel — centered box over the lobby */
+#onlinePanel { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%);
+  flex-direction:column; align-items:center; gap:9px; display:none; z-index:10;
+  background:rgba(6,22,12,0.97); border:1px solid #2f7a36; border-radius:9px;
+  padding:16px 24px; box-shadow:0 8px 28px rgba(0,0,0,.6); }
+#onlinePanel input { background:#0a2614; border:1px solid #2f7a36; color:#fff;
+  padding:5px 10px; border-radius:4px; font-size:13px; width:120px;
+  text-transform:uppercase; text-align:center; letter-spacing:2px; }
+.opbtn { background:linear-gradient(#5cc832,#2e8a10); border:1px solid #1f6608; color:#fff;
+  padding:5px 16px; border-radius:4px; cursor:pointer; font-size:11px; font-weight:700; }
+.opbtn:hover { filter:brightness(1.12); }
+.opbtn.secondary { background:linear-gradient(#7a8a7a,#4a5a4a); border-color:#3a4a3a; }
+#srvStatus { font-size:9px; color:#9ab; max-width:110px; text-align:center; line-height:1.15; }
+/* ── Count mode target picker (full-canvas overlay) ── */
+#countPanel { position:absolute; top:0; left:0; width:100%; height:100%;
+  background:rgba(4,9,18,0.97); display:none; flex-direction:column;
+  align-items:center; justify-content:center; gap:18px; z-index:55; }
+#countPanel .cp-title { color:#7ad8f0; font-size:22px; font-weight:900; letter-spacing:3px; }
+#countPanel .cp-sub { color:#4a7a90; font-size:12px; text-align:center; line-height:1.7; max-width:380px; }
+#countPanel .cp-label { color:#4a6a7a; font-size:11px; letter-spacing:1px; text-transform:uppercase; }
+.cnt-btn { background:#0d3060; border:2px solid #2060a0; color:#e8f0ff;
+  padding:14px 28px; border-radius:8px; cursor:pointer;
+  font-size:22px; font-weight:900; min-width:82px; transition:all .15s; }
+.cnt-btn:hover { background:#1a4a90; border-color:#4a90d0; transform:scale(1.06); }
+.cnt-btn .pts { display:block; font-size:10px; color:#5a8ab0; font-weight:normal; margin-top:2px; }
+/* ── Game-over overlay ── */
+#game-over { position:absolute; top:0; left:0; width:100%; height:100%;
+  background:rgba(4,9,18,0.93); display:none; flex-direction:column;
+  align-items:center; justify-content:center; gap:14px; z-index:60; }
+#game-over-title { color:#e8f0ff; font-size:26px; font-weight:900; letter-spacing:2px; text-align:center; }
+#game-over-sub { color:#6a9ab0; font-size:12px; text-align:center; line-height:1.6; }
+.gobtn { background:#1a5080; border:1px solid #2a70a0; color:#dde;
+  padding:8px 24px; border-radius:5px; cursor:pointer; font-size:13px; font-weight:bold; }
+.gobtn:hover { background:#2060a0; }
+.gobtn.secondary { background:#0d2a40; border-color:#1a4060; color:#9ab; }
+/* ── Name setup overlay ── */
+#name-setup { position:absolute; top:0; left:0; width:100%; height:100%;
+  background:rgba(4,9,18,0.97); display:none; flex-direction:column;
+  align-items:center; justify-content:center; gap:12px; z-index:70; }
+#name-setup h3 { color:#e8f0ff; font-size:20px; font-weight:900; letter-spacing:3px; }
+#name-setup .ns-sub { color:#4a7a90; font-size:11px; text-align:center; max-width:340px; line-height:1.5; }
+#name-setup .ns-fine { color:#2a4a58; font-size:9px; text-align:center; max-width:320px; line-height:1.5; }
+#name-input { background:#091e38; border:1px solid #2a6a9a; color:#fff;
+  padding:7px 14px; border-radius:5px; font-size:14px; width:260px; text-align:center; outline:none; }
+#name-input:focus { border-color:#3a90d0; }
+/* ── Ball indicators (header) ── */
+.ball-row { display:flex; flex-wrap:wrap; gap:2px; margin-top:4px; align-items:center; }
+.ball-row.right { justify-content:flex-end; }
+.bi { width:14px; height:14px; display:inline-block; cursor:default;
+  transition:opacity .25s,box-shadow .2s; flex-shrink:0; vertical-align:middle; }
+.bi.on-table { opacity:.20; }
+.bi.potted   { opacity:1; }
+.bi.rack-sel { opacity:1!important; box-shadow:0 0 0 2px #4ad8f8, 0 0 8px #4ad8f8; cursor:pointer; }
+.bi.rack-avail { opacity:0.8; cursor:pointer; }
+.bi.rack-avail:hover { box-shadow:0 0 0 2px #fff; opacity:1; }
+#ball-strip { display:none; flex-wrap:wrap; gap:3px; justify-content:center; align-items:center; }
+#count-shots { color:#e0a040; font-size:11px; font-weight:bold; margin-top:2px; }
+/* ── Scoreboard ── */
+#scoreboard { display:none; width:755px; background:#060d1a; border-top:2px solid #1a3060; }
+#sb-tabs { display:flex; border-bottom:1px solid #1a3060; }
+.sb-tab { flex:1; padding:5px 0; text-align:center; font-size:10px; color:#4a6a80;
+  cursor:pointer; letter-spacing:.5px; text-transform:uppercase; border-right:1px solid #1a3060; }
+.sb-tab:last-child { border-right:none; }
+.sb-tab:hover { color:#7aaac0; background:rgba(255,255,255,.03); }
+.sb-tab.active { color:#7ad8f0; background:rgba(60,180,220,.08); border-bottom:2px solid #3ab0d0; }
+#sb-body { display:flex; }
+.sb-col { flex:1; padding:6px 10px 8px; border-right:1px solid #0e1e30; }
+.sb-col:last-child { border-right:none; }
+.sb-col-title { color:#3a7a96; font-size:9px; font-weight:bold; text-transform:uppercase;
+  letter-spacing:1px; margin-bottom:5px; padding-bottom:3px; border-bottom:1px solid #1a3050; }
+.sb-row { display:flex; gap:4px; font-size:10px; color:#6a8a9a; padding:2px 0; }
+.sb-row .sb-rank { color:#2a5a70; width:14px; flex-shrink:0; }
+.sb-row .sb-name { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sb-row .sb-score { color:#d0900a; font-weight:bold; white-space:nowrap; }
+.sb-row.sb-self .sb-name { color:#4ad8f0; }
+.sb-row.sb-self .sb-score { color:#f0c020; }
+/* ── Rack mode overlay ── */
+#rack-panel { position:absolute; bottom:8px; left:50%; transform:translateX(-50%);
+  background:rgba(4,12,24,.94); border:1px solid #2a6080; border-radius:8px;
+  padding:8px 14px; display:none; flex-direction:column; align-items:center; gap:6px; z-index:55; }
+#rack-balls-row { display:flex; gap:5px; flex-wrap:wrap; justify-content:center; }
+#rack-panel p { color:#4a8a9a; font-size:10px; text-align:center; }
+/* ── Bottom chat row ── */
+/* Mirrors Java: SPanel_Sub29 chat @ (5,417) 620 wide + control panel @ (630,417) 125 wide */
+#bottom-row { display:none; width:755px; }
+#bottom-row.show { display:flex; }
+#chat-panel { width:620px; background:#060d1a; border-top:2px solid #1a3060;
+  display:flex; flex-direction:column; height:118px; }
+#bottom-controls { width:135px; background:#091428; border-top:2px solid #1a3060;
+  border-left:2px solid #1a3a60; display:flex; flex-direction:column;
+  align-items:stretch; padding:6px; gap:4px; }
+#bottom-controls .toggle-row { margin-top:0; flex-wrap:wrap; }
+#chat-msgs { flex:1; overflow-y:auto; padding:3px 8px; font-size:11px; line-height:1.5; color:#8a9aaa; }
+#chat-msgs .cm-p1 { color:#70d8f0; }
+#chat-msgs .cm-p2 { color:#f0a870; }
+#chat-msgs .cm-sys { color:#4a8a5a; font-style:italic; }
+#chat-input-row { display:flex; border-top:1px solid #142040; height:26px; flex-shrink:0; }
+#chat-input-row input { flex:1; background:#05101c; border:none; color:#cde;
+  padding:4px 8px; font-size:12px; outline:none; font-family:inherit; }
+#chat-input-row button { background:#1a3858; border:none; border-left:1px solid #1a4070;
+  color:#8ab; padding:0 14px; cursor:pointer; font-size:11px; white-space:nowrap; }
+#chat-input-row button:hover { background:#204070; }
