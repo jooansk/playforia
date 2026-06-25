@@ -9,5 +9,7 @@ WebSocket multiplayer (lobby, challenges, deterministic-lockstep play, spectatin
 Game play images:
 ![Alt Text](1vs1.png "1 vs 1 game view")
 
+![Alt Text](Guide_ON.png "Cheating tool")
+
 Test the current development:
 https://jooansk.github.io/playforia/
