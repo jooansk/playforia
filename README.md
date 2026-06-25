@@ -13,3 +13,6 @@ Game play images:
 
 Test the current development:
 https://jooansk.github.io/playforia/
+
+
+If you wish to share your thoughts and wish to play online or you have complaints about functionality then contact in discord channel playforia-pool
