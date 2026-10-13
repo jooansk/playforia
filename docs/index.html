@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <title>8-Ball Pool</title>
 <link rel="stylesheet" href="src/games/pool/pool.css">
+<!-- three.js is vendored (docs/vendor/three) and only fetched when the 3D view is on. -->
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/three.module.min.js", "three/addons/": "./vendor/three/addons/" } }
+</script>
 </head>
 <body>
 <!-- The shared chrome (info bar, side-panel, chat, MP controls) is built by GameShell;
@@ -171,6 +175,7 @@
 import { GameShell } from './src/platform/GameShell.js';
 import { Lobby } from './src/platform/Lobby.js';
 import * as Progression from './src/platform/progression.js';
+import * as Physics from './src/games/pool/physics-real.js';
 // Expose the shared challenge lobby to the classic engine (game.js opens it on Verkkopeli).
 window.PlatformLobby = Lobby;
 // Expose the progression/store layer (badges, tokens, assets) to the classic engine.
@@ -181,7 +186,43 @@ GameShell.boot({
   boardHTML: document.getElementById('pool-board').innerHTML,
   footer: document.getElementById('pool-footer').content.firstElementChild.cloneNode(true),
   engineSrc: 'src/games/pool/game.js',
+  onEngineLoad: installExtras,
 });
+
+// Realistic physics (pooltool model; local modes) + the three.js 3D view, both switchable
+// from the side panel. The 3D module (and three.js) loads only when the view is turned on.
+// ?view=2d / ?view=3d overrides the saved choice.
+function installExtras() {
+  Physics.install();
+  const panel = document.getElementById('side-panel');
+  const before = document.getElementById('cheatBtn');
+  const mkBtn = (id) => { const b = document.createElement('button'); b.id = id; b.className = 'spbtn'; panel.insertBefore(b, before); return b; };
+
+  const physBtn = mkBtn('physicsBtn');
+  physBtn.title = 'Realistic: sliding/rolling/spin physics (pooltool model). Classic: the original Playforia engine. Online games always use Classic.';
+  const showPhys = () => { physBtn.innerHTML = Physics.isEnabled() ? '&#9881; Physics: Real' : '&#9881; Physics: Classic'; };
+  physBtn.onclick = () => { Physics.setEnabled(!Physics.isEnabled()); showPhys(); };
+  showPhys();
+
+  const viewBtn = mkBtn('view3dBtn');
+  let v3d = null, on = false;
+  const setView = async (want) => {
+    try {
+      if (want && !v3d) v3d = await import('./src/games/pool/view3d.js');
+      if (v3d) { if (want) v3d.enable(); else v3d.disable(); }
+      on = want;
+    } catch (err) {
+      console.error('3D view unavailable', err);
+      on = false; viewBtn.disabled = true; viewBtn.title = '3D view needs WebGL';
+    }
+    viewBtn.innerHTML = on ? '&#9638; 2D view' : '&#127909; 3D view';
+    try { localStorage.setItem('pool-view', on ? '3d' : '2d'); } catch (_) {}
+  };
+  viewBtn.onclick = () => setView(!on);
+  let pref = new URLSearchParams(location.search).get('view');
+  if (!pref) { try { pref = localStorage.getItem('pool-view'); } catch (_) {} }
+  setView(pref !== '2d');
+}
 </script>
 </body>
 </html>

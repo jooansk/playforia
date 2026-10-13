@@ -3026,11 +3026,7 @@ canvas.addEventListener('mousedown', e => {
   if (rackBallId < 1) return;
   // Consume the event so the cue-ball placement handler doesn't also fire
   e.stopImmediatePropagation();
-  const rect = canvas.getBoundingClientRect();
-  const sx = canvas.width  / rect.width;
-  const sy = canvas.height / rect.height;
-  const cx = (e.clientX - rect.left) * sx;
-  const cy = (e.clientY - rect.top)  * sy;
+  const [cx, cy] = canvasCoords(e);   // table coords (independent of the canvas's pixel size)
   if (cx < BORDER+BALL_R || cx > TW-BORDER-BALL_R) return;
   if (cy < BORDER+BALL_R || cy > TH-BORDER-BALL_R) return;
   for (let i = 0; i < balls.length; i++) {
