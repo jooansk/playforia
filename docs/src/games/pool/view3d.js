@@ -47,7 +47,8 @@ const view = {
   pitch: 10 * DEG, dist: 7,     // player's eye: ~7 ball widths behind the cue ball, just over the cue
   bcYaw: -Math.PI / 2, bcPitch: 40 * DEG,   // broadcast view (orbitable)
   ballsRef: null, lastState: -1, lastEff: 'broadcast',
-  strikeAt: 0, strikeGap: 0,
+  strikeAt: 0, strikePower: 50,
+  gap: 0, sawT0: null, stroke: null,   // cue stroke state (see cueGap)
   shotFrom: null,        // { x, y, yaw } of the cue ball at the strike — the "stand up" pivot
 };
 window.poolCue = window.poolCue || { elevation: 5 };   // read by physics-real.js
@@ -91,6 +92,7 @@ export function disable() {
   window.removeEventListener('keydown', onKeyDown, true);
   window.removeEventListener('keyup', onKeyUp, true);
   if (input.spaceDown) releaseShot();
+  if (view.stroke) finishStroke();          // don't leave a shot half-released
   delete window.poolCue.effective;
   gc.width = TW; gc.height = TH;
   gc.style.width = gc.style.height = '';
@@ -650,11 +652,56 @@ function railClearance(cx, cy, ax, ay, vert, into) {
   return Math.min(85, Math.max(0, a1, a2) / DEG);
 }
 
-function updateCue(now) {
+// Cue stroke, in "gap" = distance from the tip back to the contact point on the ball:
+//   aiming     — the tip rests a little behind the ball;
+//   charging   — practice strokes (sawing), longer as the power builds;
+//   release    — the stick drives forward; the shot is fired when the tip reaches the ball;
+//   follow-through — the tip carries on through where the ball was (never into it).
+const STROKE_MS = 700;                    // one practice stroke (back and forth)
+
+function cueGap(now, dt) {
+  const R = BALL_R, rest = R * 1.3;
+  let target;
+  if (view.stroke) {
+    // Accelerating drive from wherever the stick was to the ball.
+    const st = view.stroke, k = Math.min(1, (now - st.t0) / st.ms);
+    view.gap = st.from * (1 - k * k);
+    if (k >= 1) finishStroke();
+    return view.gap;
+  }
+  if (mdown) {
+    if (view.sawT0 == null) view.sawT0 = now;
+    const amp = R * (0.8 + 2.6 * power / 100);
+    const ph = ((now - view.sawT0) / STROKE_MS) * Math.PI * 2;
+    target = rest * 0.6 + amp * (0.5 - 0.5 * Math.cos(ph));
+  } else {
+    view.sawT0 = null;
+    target = shooting ? 0 : rest;           // online: hold at the ball until the server echoes
+  }
+  view.gap += (target - view.gap) * Math.min(1, dt * 14);
+  return view.gap;
+}
+
+// Begin the final stroke; `fireShot` releases the engine's shot when the tip meets the ball.
+function startStroke(fireShot) {
+  if (view.stroke) return;
+  const p = power;
+  view.stroke = { t0: performance.now(), from: view.gap, power: p, fire: fireShot,
+    ms: 70 + view.gap / (BALL_R * 3.4) * (150 - p) };
+}
+function finishStroke() {
+  const st = view.stroke;
+  view.stroke = null;
+  power = st.power;                         // the engine kept charging during the drive
+  view.strikePower = st.power;
+  st.fire();
+}
+
+function updateCue(now, dt) {
   const cue = table.cue, cu = balls[0];
   const myTurn = localControlsTurn();
   const aiming = gState === S.AIM && myTurn && cu && cu.active && mx >= 0;
-  const striking = now - view.strikeAt < 380;
+  const t = now - view.strikeAt, striking = t < 650;
   if (!aiming && !striking) { cue.visible = false; return; }
   // While aiming the cue follows the cue ball; during the follow-through it stays where the
   // ball was struck (the ball rolls away from it).
@@ -668,14 +715,21 @@ function updateCue(now) {
   const into = Math.sqrt(Math.max(R * R - side * side - vert * vert, 0));
   let gap, elevDeg;
   if (aiming) {
-    gap = R * 0.15 + (mdown ? power * R * 0.055 : 0);
+    gap = cueGap(now, dt);
     // Raise the cue as far as needed to clear the rail (published for the physics).
     view.railMin = railClearance(cx, cy, ax, ay, vert, into);
     elevDeg = Math.max(window.poolCue.elevation, view.railMin);
     window.poolCue.effective = elevDeg;
   } else {
-    gap = Math.max(0, view.strikeGap * (1 - (now - view.strikeAt) / 70));
+    // Follow-through: ease past the contact point, further on harder shots, but never into
+    // the (possibly slow) cue ball, then lift away.
+    const reach = R * (0.6 + 3.4 * (view.strikePower || 50) / 100);
+    const k = Math.min(1, t / 140);
+    gap = -reach * (1 - (1 - k) * (1 - k));
+    const ballAhead = (cu ? (cu.x - cx) * ax + (cu.y - cy) * ay : Infinity);
+    gap = Math.max(gap, -Math.max(0, ballAhead) - 0.2);
     elevDeg = view.strikeElev;
+    view.gap = R * 1.3;                     // next aim starts from rest
   }
   const elev = elevDeg * DEG;
   const bx = -ax * Math.cos(elev), by = Math.sin(elev), bz = -ay * Math.cos(elev);
@@ -688,7 +742,7 @@ function updateCue(now) {
   cue.lookAt(target);
   cue.visible = true;
   if (aiming) {
-    view.strikeGap = gap; view.strikeMx = mx; view.strikeMy = my;
+    view.strikeMx = mx; view.strikeMy = my;
     view.strikeSpinX = spinX; view.strikeSpinY = spinY;
     view.strikeCx = cu.x; view.strikeCy = cu.y; view.strikeElev = elevDeg;
   }
@@ -1063,8 +1117,9 @@ function bindPointer(el) {
     if (input.drag) { input.drag = null; el.style.cursor = ''; }
     if (input.forwarding) {
       input.forwarding = false;
-      const p = input.lastTable || [mx, my];
-      fire('mouseup', p[0], p[1], e.button === 2 ? 2 : 0);
+      const p = input.lastTable || [mx, my], btn = e.button === 2 ? 2 : 0;
+      if (mdown && gState === S.AIM) startStroke(() => fire('mouseup', p[0], p[1], btn));
+      else fire('mouseup', p[0], p[1], btn);
     }
   };
   el.addEventListener('pointerup', up);
@@ -1085,7 +1140,7 @@ function typingTarget(e) {
 }
 
 function pressShot() {
-  if (input.spaceDown || !table) return;
+  if (input.spaceDown || view.stroke || !table) return;
   if (gState !== S.AIM || !localControlsTurn() || mx < 0 || !balls[0] || !balls[0].active) return;
   input.spaceDown = true;
   fire('mousedown', mx, my, 0);
@@ -1093,7 +1148,7 @@ function pressShot() {
 function releaseShot() {
   if (!input.spaceDown) return;
   input.spaceDown = false;
-  fire('mouseup', mx, my, 0);
+  startStroke(() => fire('mouseup', mx, my, 0));
 }
 
 function onKeyDown(e) {
@@ -1150,7 +1205,7 @@ function renderFrame() {
   updateAim();
   drawOverlay();
   updateBalls();
-  updateCue(now);
+  updateCue(now, dt);
   updateGhost();
   updateAimAid();
   updateCamera(dt);

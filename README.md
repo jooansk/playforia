@@ -21,7 +21,8 @@ or `?view=2d` / `?view=3d` in the URL):
   back to show the whole table. While aiming, a line runs to the exact contact point, with a ghost
   ball and short lines showing where the object ball and the cue ball will go.
   - drag: aim (hold **Shift** for fine aim; vertical drag raises/lowers your eye)
-  - hold **Space** or the **right mouse button** (or the *Hold to shoot* button) to charge, release to shoot
+  - hold **Space** or the **right mouse button** (or the *Hold to shoot* button) to charge: the cue saws back and
+    forth, with longer strokes as the power builds. Release to shoot: the cue drives through the ball
   - **[ / ]**: cue elevation · **← →**: fine aim · **mouse wheel**: step closer/back · **V**: switch view
   - near a cushion the cue rises automatically to clear the rail (almost vertical for a centre hit on a
     frozen ball); press **[** to keep it lower by striking higher on the ball (topspin)
