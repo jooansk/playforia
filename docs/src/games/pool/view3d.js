@@ -15,7 +15,7 @@
 // Engine globals used (classic-script lexical scope is shared with modules): balls gState S
 // TW TH BALL_R BALL_D PCAPT BORDER gameMode mx my mdown power spinX spinY freeBall
 // rackBallId countPoints countTarget countShots ctx isValidPlacement
-// localControlsTurn applyAssist drawAimAssist drawAssistChain HEAD_STRING_X
+// localControlsTurn applyAssist drawAimAssist drawAssistChain drawSpinPanel HEAD_STRING_X
 // SNK_BAULK_X SNK_D_CY SNK_D_R SNOOKER_SPOTS POOL_FOOT_X POOL_FOOT_Y
 
 import * as THREE from 'three';
@@ -91,6 +91,7 @@ export function disable() {
   window.removeEventListener('keydown', onKeyDown, true);
   window.removeEventListener('keyup', onKeyUp, true);
   if (input.spaceDown) releaseShot();
+  delete window.poolCue.effective;
   gc.width = TW; gc.height = TH;
   gc.style.width = gc.style.height = '';
   const gw = document.getElementById('game-wrap');
@@ -283,11 +284,8 @@ function buildRoom() {
     const rod = new THREE.Mesh(new THREE.CylinderGeometry(1.5, 1.5, 700, 6), bar.material);
     rod.position.set(x, 380, 0); lamp.add(rod);
   }
-  lamp.position.y = 430;
-  room.add(lamp);
+  T.scene.add(lamp);            // height is set per table (buildTable)
   T.lamp = lamp;
-  T.fill1.position.set(-210, 400, 0);
-  T.fill2.position.set(210, 400, 0);
 
   T.scene.add(room);
   T.room = room;
@@ -357,17 +355,24 @@ function buildTable() {
   const woodMat = new THREE.MeshStandardMaterial({ roughness: 0.45, map: canvasTex(512, 128, (c, w, h) => woodGrain(c, w, h, WOOD, false)) });
   const darkMat = new THREE.MeshStandardMaterial({ color: WOOD_DARK, roughness: 0.6 });
   const hidden = new THREE.MeshBasicMaterial({ visible: false });
-  const W = TW + 2 * ext, H = TH + 2 * ext, apronH = 34;
+  // Real tables put the cloth ~13½ ball widths above the floor (snooker ~16½); the room and
+  // lamp follow, so a regulation-size rack sits on a regulation-height table.
+  const tableH = (key === 'snooker' ? 16.4 : 13.5) * BALL_D;
+  T.room.position.y = 300 - tableH;                 // the room's floor is built at y = −300
+  T.lamp.position.y = Math.max(16 * BALL_D, 190);
+  T.fill1.position.set(-210, T.lamp.position.y - 30, 0);
+  T.fill2.position.set(210, T.lamp.position.y - 30, 0);
+  const W = TW + 2 * ext, H = TH + 2 * ext, apronH = Math.round(tableH * 0.18), bodyH = Math.round(tableH * 0.24);
   const apron = new THREE.Mesh(new THREE.BoxGeometry(W, apronH, H),
     [woodMat, woodMat, hidden, woodMat, woodMat, woodMat]);
   apron.position.set(TW / 2, -apronH / 2, TH / 2);
   apron.castShadow = true; g.add(apron);
-  const body = new THREE.Mesh(new THREE.BoxGeometry(W - 40, 70, H - 40), darkMat);
-  body.position.set(TW / 2, -apronH - 35, TH / 2); body.castShadow = true; g.add(body);
-  const legH = 300 - apronH - 70;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(W - 40, bodyH, H - 40), darkMat);
+  body.position.set(TW / 2, -apronH - bodyH / 2, TH / 2); body.castShadow = true; g.add(body);
+  const legH = tableH - apronH - bodyH;
   for (const [lx, lz] of [[40, 40], [TW - 40, 40], [40, TH - 40], [TW - 40, TH - 40], [TW / 2, 40], [TW / 2, TH - 40]]) {
     const leg = new THREE.Mesh(new THREE.BoxGeometry(46, legH, 46), woodMat);
-    leg.position.set(lx, -apronH - 70 - legH / 2, lz); leg.castShadow = true; g.add(leg);
+    leg.position.set(lx, -apronH - bodyH - legH / 2, lz); leg.castShadow = true; g.add(leg);
   }
 
   // Balls.
@@ -400,6 +405,7 @@ function buildTable() {
 
   const cue = buildCue(R);
   g.add(cue);
+  const cueR0 = R * 0.24;
 
   T.scene.add(g);
 
@@ -411,7 +417,7 @@ function buildTable() {
   const aim = buildAimAid(R);
   g.add(aim.group);
 
-  table = { key, tw: TW, group: g, geo, meshes, ghost, overlay, overlayTex, cue, aim, ballsRef: balls, hRail };
+  table = { key, tw: TW, r: R, group: g, geo, meshes, ghost, overlay, overlayTex, cue, cueR0, aim, ballsRef: balls, hRail, hCush };
   cam.ready = false;
 }
 
@@ -606,7 +612,8 @@ function updateBalls() {
 
 // ─── cue stick ─────────────────────────────────────────────────────────────────────
 function buildCue(R) {
-  const L = 0.62 * TW, r0 = Math.max(R * 0.24, 1.5), r1 = Math.max(R * 0.6, 4.2);
+  // ~26 ball widths long (a 58" cue for a 2¼" ball), tip ≈ ¼ R, butt ≈ ⅝ R.
+  const L = Math.min(26 * 2 * R, 0.62 * TW), r0 = R * 0.24, r1 = R * 0.62;
   const rad = z => r0 + (r1 - r0) * (z / L);
   const cue = new THREE.Group();
   const part = (z0, z1, mat) => {
@@ -628,28 +635,54 @@ function buildCue(R) {
   return cue;
 }
 
+// Lowest cue elevation (deg) that clears the cushion nose and the rail behind the cue ball,
+// for a tip contact at height R + vert. The cue rises from the contact point, so the binding
+// spots are where it passes over the cushion nose and the start of the wooden rail.
+function railClearance(cx, cy, ax, ay, vert, into) {
+  const f = table.geo.faces, bx = -ax, by = -ay;
+  let t = Infinity;                                  // ball centre → cushion line, behind the ball
+  if (bx < -1e-6) t = Math.min(t, (f.L - cx) / bx); else if (bx > 1e-6) t = Math.min(t, (f.R - cx) / bx);
+  if (by < -1e-6) t = Math.min(t, (f.T - cy) / by); else if (by > 1e-6) t = Math.min(t, (f.B - cy) / by);
+  const x = t - into, R = BALL_R, hc = R + vert, rc = table.cueR0 * 1.6 + 0.4;
+  if (x <= 0.3) return 85;
+  const a1 = Math.atan2(table.hCush + rc - hc, x);
+  const a2 = Math.atan2(table.hRail + rc - hc, x + table.geo.cushionWidth);
+  return Math.min(85, Math.max(0, a1, a2) / DEG);
+}
+
 function updateCue(now) {
   const cue = table.cue, cu = balls[0];
   const myTurn = localControlsTurn();
   const aiming = gState === S.AIM && myTurn && cu && cu.active && mx >= 0;
   const striking = now - view.strikeAt < 380;
   if (!aiming && !striking) { cue.visible = false; return; }
-  const dx = (aiming ? mx : view.strikeMx) - cu.x, dy = (aiming ? my : view.strikeMy) - cu.y;
+  // While aiming the cue follows the cue ball; during the follow-through it stays where the
+  // ball was struck (the ball rolls away from it).
+  const cx = aiming ? cu.x : view.strikeCx, cy = aiming ? cu.y : view.strikeCy;
+  const dx = (aiming ? mx : view.strikeMx) - cx, dy = (aiming ? my : view.strikeMy) - cy;
   const len = Math.hypot(dx, dy);
-  if (len < 1) { cue.visible = false; return; }
+  if (len < 1 || cx == null) { cue.visible = false; return; }
   const ax = dx / len, ay = dy / len, R = BALL_R;
   const sx = (aiming ? spinX : view.strikeSpinX), sy = (aiming ? spinY : view.strikeSpinY);
   const side = sx * R * 0.5, vert = -sy * R * 0.5;
   const into = Math.sqrt(Math.max(R * R - side * side - vert * vert, 0));
-  let gap;
-  if (aiming) gap = R * 0.15 + (mdown ? power * R * 0.055 : 0);
-  else gap = Math.max(0, view.strikeGap * (1 - (now - view.strikeAt) / 70));
-  const elev = window.poolCue.elevation * DEG;
+  let gap, elevDeg;
+  if (aiming) {
+    gap = R * 0.15 + (mdown ? power * R * 0.055 : 0);
+    // Raise the cue as far as needed to clear the rail (published for the physics).
+    view.railMin = railClearance(cx, cy, ax, ay, vert, into);
+    elevDeg = Math.max(window.poolCue.elevation, view.railMin);
+    window.poolCue.effective = elevDeg;
+  } else {
+    gap = Math.max(0, view.strikeGap * (1 - (now - view.strikeAt) / 70));
+    elevDeg = view.strikeElev;
+  }
+  const elev = elevDeg * DEG;
   const bx = -ax * Math.cos(elev), by = Math.sin(elev), bz = -ay * Math.cos(elev);
   // Contact point on the ball (offset by the spin), then back along the cue axis.
-  const px = cu.x + (-ay) * side - ax * into + bx * gap;
+  const px = cx + (-ay) * side - ax * into + bx * gap;
   const py = R + vert + by * gap;
-  const pz = cu.y + ax * side - ay * into + bz * gap;
+  const pz = cy + ax * side - ay * into + bz * gap;
   cue.position.set(px, py, pz);
   const target = table.group.localToWorld(new THREE.Vector3(px + bx, py + by, pz + bz));
   cue.lookAt(target);
@@ -657,7 +690,7 @@ function updateCue(now) {
   if (aiming) {
     view.strikeGap = gap; view.strikeMx = mx; view.strikeMy = my;
     view.strikeSpinX = spinX; view.strikeSpinY = spinY;
-    view.strikeCx = cu.x; view.strikeCy = cu.y;
+    view.strikeCx = cu.x; view.strikeCy = cu.y; view.strikeElev = elevDeg;
   }
 }
 
@@ -845,8 +878,6 @@ function updateCamera(dt) {
   let rate = 5;
   if (eff === 'aim') {
     const yaw = Math.atan2(my - cu.y, mx - cu.x);
-    const ahead = BALL_D * 2.5;
-    wantTgt.set(cu.x + Math.cos(yaw) * ahead + off.x, BALL_R, cu.y + Math.sin(yaw) * ahead + off.z);
     // Keep the eye above the cue (which rises at the cue elevation) so it never fills the view,
     // and lean over the rail when the cue ball is close to it, like a player would.
     const f = table.geo.faces, bx = -Math.cos(yaw), by = -Math.sin(yaw);
@@ -854,9 +885,16 @@ function updateCamera(dt) {
     if (bx < -1e-6) edge = Math.min(edge, (f.L - cu.x) / bx); else if (bx > 1e-6) edge = Math.min(edge, (f.R - cu.x) / bx);
     if (by < -1e-6) edge = Math.min(edge, (f.T - cu.y) / by); else if (by > 1e-6) edge = Math.min(edge, (f.B - cu.y) / by);
     const overRail = edge < view.dist * BALL_D ? Math.atan2(table.hRail + BALL_R * 0.5 - BALL_R, Math.max(edge, 1)) : 0;
-    const pitch = Math.max(view.pitch, (window.poolCue.elevation + 7) * DEG, overRail);
-    orbit(new THREE.Vector3(cu.x + off.x, BALL_R, cu.y + off.z), yaw, pitch, view.dist * BALL_D, wantPos);
+    const cueDeg = window.poolCue.effective != null ? window.poolCue.effective : window.poolCue.elevation;
+    const pitch = Math.max(view.pitch, Math.min(cueDeg + 7, 82) * DEG, overRail);   // look down over a raised cue
+    // A raised eye also steps back (as a player straightening over a jacked-up cue does), so
+    // the cue ball and the table ahead both stay in view.
+    const raise = Math.max(0, (pitch - view.pitch) / (70 * DEG));
+    orbit(new THREE.Vector3(cu.x + off.x, BALL_R, cu.y + off.z), yaw, pitch, view.dist * BALL_D * (1 + 1.5 * raise), wantPos);
     wantPos.y = Math.max(wantPos.y, table.hRail + 4);
+    // Look a little past the cue ball; the higher the eye, the further down the table.
+    const ahead = BALL_D * (2.5 + 3.5 * raise);
+    wantTgt.set(cu.x + Math.cos(yaw) * ahead + off.x, BALL_R, cu.y + Math.sin(yaw) * ahead + off.z);
     rate = input.drag ? 30 : 9;
   } else if (eff === 'freeze') {
     // After the strike the player steps back to take in the whole table, still facing
@@ -946,8 +984,9 @@ function updateHud() {
   }
   const el = hud.querySelector('.v3d-elev');
   el.style.display = aiming && eff === 'aim' ? 'flex' : 'none';
-  const e = window.poolCue.elevation;
-  el.querySelector('span').textContent = e.toFixed(0) + '°';
+  const e = window.poolCue.effective != null ? window.poolCue.effective : window.poolCue.elevation;
+  const raised = view.railMin > window.poolCue.elevation + 0.5;
+  el.querySelector('span').textContent = e.toFixed(0) + '°' + (raised ? ' · rail ([ = hit higher)' : '');
   const line = el.querySelector('.v3d-elev-cue');
   line.setAttribute('x2', (58 - Math.cos(e * DEG) * 50).toFixed(1));
   line.setAttribute('y2', (30 - Math.sin(e * DEG) * 50).toFixed(1));
@@ -1063,6 +1102,13 @@ function onKeyDown(e) {
   if (e.key === 'v' || e.key === 'V') { setUserView(view.user === 'aim' ? 'top' : 'aim'); return; }
   if (e.key === '[' || e.key === ']') {
     const c = window.poolCue;
+    if (e.key === '[' && view.railMin > c.elevation + 0.5 && spinY > -0.9) {
+      // The rail is holding the cue up: keep it low by striking higher on the ball (topspin),
+      // as a player does when the cue ball is near a cushion.
+      spinY = Math.max(-Math.sqrt(Math.max(0.88 - spinX * spinX, 0)), spinY - 0.12);
+      drawSpinPanel();
+      return;
+    }
     c.elevation = clamp(c.elevation + (e.key === ']' ? 1 : -1), 0, 60);
     return;
   }
@@ -1089,7 +1135,7 @@ function renderFrame() {
   const dt = Math.min(0.1, lastFrame ? (now - lastFrame) / 1000 : 0.016);
   lastFrame = now;
   const key = gameMode === 'snooker' ? 'snooker' : 'pool';
-  if (!table || table.key !== key || table.tw !== TW || table.meshes.length !== balls.length) buildTable();
+  if (!table || table.key !== key || table.tw !== TW || table.r !== BALL_R || table.meshes.length !== balls.length) buildTable();
   if (view.ballsRef !== balls) {          // new rack (resetGame builds a fresh balls[])
     view.ballsRef = balls; view.yaw = null;
     for (const m of table.meshes) { m.userData.last = null; m.userData.q = null; }

@@ -13,12 +13,13 @@
 
 const DEG = Math.PI / 180;
 
+// Face positions in px (the cloth area, as in the 2D masks); pocket sizes in ball radii so
+// they stay right when the balls are scaled to regulation size.
+//   k: corner hole centre beyond the face corner; e: side hole centre beyond the face
+//   cm/sm: corner/side mouth half-sizes along the face; jaw convergence angles (deg)
 const SPECS = {
-  //            cushion faces (left, right-from-TW, top, bottom-from-TH)
-  //            k: corner hole centre beyond the face corner; e: side hole centre beyond the face
-  //            cm/sm: corner/side mouth half-sizes along the face; jaw convergence angles
-  pool:    { L: 30.5, Rr: 31.5, T: 30.5, Bb: 31.5, k: 2.5, e: 12.5, cm: 27, sm: 21.5, betaC: 7, betaS: 14 },
-  snooker: { L: 29.5, Rr: 30.5, T: 29.5, Bb: 30.5, k: 4, e: 9, cm: 14, sm: 11.5, betaC: 7, betaS: 14 },
+  pool:    { L: 30.5, Rr: 31.5, T: 30.5, Bb: 31.5, k: 0.25, e: 1.25, cm: 2.7, sm: 2.15, betaC: 7, betaS: 14 },
+  snooker: { L: 29.5, Rr: 30.5, T: 29.5, Bb: 30.5, k: 0.67, e: 1.5, cm: 2.33, sm: 1.92, betaC: 7, betaS: 14 },
 };
 
 /**
@@ -29,7 +30,8 @@ const SPECS = {
  * @param {number} o.R   ball radius (px)
  */
 export function buildTable({ mode, TW, TH, R }) {
-  const s = SPECS[mode] || SPECS.pool;
+  const sp = SPECS[mode] || SPECS.pool;
+  const s = { ...sp, k: sp.k * R, e: sp.e * R, cm: sp.cm * R, sm: sp.sm * R };
   const L = s.L, Rx = TW - s.Rr, T = s.T, B = TH - s.Bb, cx = (L + Rx) / 2;
   const cw = Math.max(7, R * 1.1);                 // cushion depth (face → back line)
   const n = Math.SQRT1_2;
@@ -94,7 +96,7 @@ export function buildTable({ mode, TW, TH, R }) {
     seg(p.jout.J, p.jout.tan);
   });
 
-  return { mode, TW, TH, faces: { L, R: Rx, T, B }, cushionWidth: cw, pockets, felt, opening, cushions, segs };
+  return { mode, TW, TH, R, faces: { L, R: Rx, T, B }, cushionWidth: cw, pockets, felt, opening, cushions, segs };
 }
 
 /** Index of the pocket whose hole is under (x,y), or −1. */

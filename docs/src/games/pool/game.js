@@ -24,6 +24,13 @@ let WDIAG   = Math.sqrt(50) + 0.5; // diagonal probe (aDouble4136 ≈ 7.57)
 let PX = [26, 310, 593, 26, 310, 593];
 let PY = [26,  21,  26,305, 310, 305];
 
+// Ball size multiplier. 1 = the original Playforia proportions (big balls on a small table:
+// ~6 ft bar-box). The realistic-physics module sets a regulation scale (9 ft pool / 12 ft
+// snooker) for local games; it takes effect at the next resetGame(). Online stays at 1, and
+// every rack/geometry formula below reduces to the original numbers exactly when it is 1.
+let BALL_SCALE = 1;
+function setBallScale(s) { BALL_SCALE = s > 0 ? s : 1; }
+
 // Snooker "D" geometry (SPanel_Sub32_Sub2 method2678): semicircle on baulk line
 const SNK_BAULK_X = 138.79715691634772;
 const SNK_D_CY    = 165.0;
@@ -32,16 +39,16 @@ const SNK_D_R     = 43.12910284463895;
 function setGeometry(mode){
   if(mode==='snooker'){
     // SPanel_Sub32_Sub2.method2650()
-    TW=600; BALL_D=12; BALL_R=6; STRIKE=9;
+    TW=600; BALL_R=6*BALL_SCALE; BALL_D=2*BALL_R; STRIKE=9;
     FRIC=0.995; STOPV=0.08;
-    PCAPT=2.0; PDET=1.5; WDIAG=Math.sqrt(18)+0.5;
+    PCAPT=2.0; PDET=1.5; WDIAG=Math.sqrt(BALL_R*BALL_R/2)+0.5;
     PX=[23,300,576, 23,300,576];   // anIntArray4880
     PY=[24, 19, 24,306,311,306];   // anIntArray4881
   } else {
     // SPanel_Sub32_Sub1.method2650()
-    TW=620; BALL_D=20; BALL_R=10; STRIKE=10;
+    TW=620; BALL_R=10*BALL_SCALE; BALL_D=2*BALL_R; STRIKE=10;
     FRIC=0.9935; STOPV=0.09;
-    PCAPT=3.0; PDET=2.1; WDIAG=Math.sqrt(50)+0.5;
+    PCAPT=3.0; PDET=2.1; WDIAG=Math.sqrt(BALL_R*BALL_R/2)+0.5;
     PX=[26,310,593, 26,310,593];
     PY=[26, 21, 26,305,310,305];
   }
@@ -615,7 +622,7 @@ function rackSnooker() {
   const half = BALL_R + gap * 0.5;       // var17 = 6.2
   const rowDx = Math.sqrt(side*side - half*half); // var19 ≈ 10.739 (row x-spacing)
   let id = 1;
-  let rx = 449.0;                        // var23 (apex x = pink 435 + 2 + 12)
+  let rx = 435 + 2 * BALL_SCALE + BALL_D; // var23 (apex x = pink 435 + 2 + 12 at scale 1)
   for (let row = 0; row < 5; row++) {
     const n = row + 1;
     let y = 165.0 - Math.floor((n-1)/2) * BALL_D - (n/2) * gap; // var26
@@ -745,15 +752,16 @@ function rackSeeded(seed) {
     [pool[5], pool[6], pool[7], pool[8]],
     [pool[9], pool[10],pool[11],pool[12],pool[13]]
   ];
+  const k=BALL_D/20;   // rack spacing scales with the ball (k = 1: original)
   for(let row=0;row<5;row++){
     const n=row+1;
-    const rx=445+row*(ROWSP+0.9);
-    let ry=(165-(Math.floor((n-1)/2)*20))-(n/2)*0.9;
-    if(n%2===0) ry-=10;
+    const rx=445+row*(ROWSP+0.9)*k;
+    let ry=(165-(Math.floor((n-1)/2)*20*k))-(n/2)*0.9*k;
+    if(n%2===0) ry-=10*k;
     for(let col=0;col<n;col++){
       const id=layout[row][col];
       const b=balls[id];
-      b.x=rx; b.y=ry+col*20.9;
+      b.x=rx; b.y=ry+col*20.9*k;
       b.vx=b.vy=0; b.active=true; b.falling=false; b.fp=0;
     }
   }
@@ -778,16 +786,17 @@ function rack(){
     [pool[9], pool[10],pool[11],pool[12],pool[13]]
   ];
 
+  const k=BALL_D/20;   // rack spacing scales with the ball (k = 1: original)
   for(let row=0;row<5;row++){
     const n=row+1;
-    const rx=445+row*(ROWSP+0.9);
+    const rx=445+row*(ROWSP+0.9)*k;
     // method2657 startY formula
-    let ry=(165-(Math.floor((n-1)/2)*20))-(n/2)*0.9;
-    if(n%2===0) ry-=10;
+    let ry=(165-(Math.floor((n-1)/2)*20*k))-(n/2)*0.9*k;
+    if(n%2===0) ry-=10*k;
     for(let col=0;col<n;col++){
       const id=layout[row][col];
       const b=balls[id];
-      b.x=rx; b.y=ry+col*20.9;
+      b.x=rx; b.y=ry+col*20.9*k;
       b.vx=b.vy=0; b.active=true; b.falling=false; b.fp=0;
     }
   }
@@ -795,14 +804,14 @@ function rack(){
 
 // Generate up to 15 rack positions in triangle order (apex first)
 function rackPositions(count) {
-  const pos = [];
+  const pos = [], k = BALL_D / 20;   // spacing scales with the ball (k = 1: original)
   for (let row = 0; row < 5 && pos.length < count; row++) {
     const n   = row + 1;
-    const rx  = 445 + row * (ROWSP + 0.9);
-    let   ry  = (165 - (Math.floor((n-1)/2) * 20)) - (n/2) * 0.9;
-    if (n % 2 === 0) ry -= 10;
+    const rx  = 445 + row * (ROWSP + 0.9) * k;
+    let   ry  = (165 - (Math.floor((n-1)/2) * 20 * k)) - (n/2) * 0.9 * k;
+    if (n % 2 === 0) ry -= 10 * k;
     for (let col = 0; col < n && pos.length < count; col++) {
-      pos.push({ x: rx, y: ry + col * 20.9 });
+      pos.push({ x: rx, y: ry + col * 20.9 * k });
     }
   }
   return pos;
@@ -2660,6 +2669,7 @@ class Network {
         document.getElementById('bottom-row').classList.add('show');
         clearChat();
         addChatMsg('sys', '', 'Game started! Room: ' + (this.roomId||''));
+        setBallScale(1);   // online: original ball size on every client (lockstep)
         setGeometry('');   // online is always 8-ball → pool geometry/friction
         balls = Array.from({length:16},(_,i)=>mkBall(i));
         curP = 0; group = [-1,-1]; winner = -1; freeBall = false;
@@ -2696,6 +2706,7 @@ class Network {
         document.getElementById('bottom-row').classList.add('show');
         clearChat();
         addChatMsg('sys', '', 'Katsot peliä: ' + (msg.names ? msg.names.join(' vs ') : ''));
+        setBallScale(1);   // online: original ball size on every client (lockstep)
         setGeometry('');   // online is always 8-ball → pool geometry/friction
         balls = Array.from({length:16},(_,i)=>mkBall(i));
         curP = 0; group = [-1,-1]; winner = -1; freeBall = false;

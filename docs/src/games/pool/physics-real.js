@@ -32,16 +32,19 @@ const G = 9.81;                         // m/s²
 const M_BALL = 0.170, M_CUE = 0.567;    // kg
 const R_POOL = 0.028575, R_SNOOKER = 0.02625;   // m (2¼" pool ball, 52.5 mm snooker ball)
 const MU_S = 0.2;                       // sliding friction
-const MU_R = 0.01;                      // rolling friction
+const MU_R = 0.012;                     // rolling friction
 const MU_SP_PER_R = 10 * 2 / 5 / 9;     // spinning friction μsp = this × R (pooltool default)
 const E_BALL = 0.95;                    // ball–ball restitution
-const E_CUSHION = 0.85, F_CUSHION = 0.2;    // Han 2005: cushion restitution & friction
+const E_CUSHION = 0.8, F_CUSHION = 0.2;     // Han 2005: cushion restitution & friction
 const CUSHION_H = 1.28;                 // cushion contact height / R (pooltool: 0.64 · 2R)
 const SPIN_OFFSET = 0.5;                // full spin-panel deflection → tip offset of 0.5 R
 const SUBSTEPS = 24;                    // integration steps per 1/60 s frame
 const FRAME = 1 / 60;
 const FALL_FRAMES = 12;                 // pocket drop animation length (frames)
 const CLASSIC_V = 300;                  // px/s → the classic engine's velocity units (sound)
+// Regulation tables: Playforia's cloth area is kept and the balls shrink to real proportions
+// (play area ≈ 44 × 22 ball widths for a 9 ft pool table, ≈ 68 × 34 for a 12 ft snooker table).
+const REAL_BALL_SCALE = { pool: 0.635, snooker: 0.66 };
 
 let enabled = loadPref();
 let installed = false;
@@ -78,12 +81,21 @@ export function install() {
     if (!sim) return classic.step();
     return stepReal();
   };
+  // Table size follows the physics model, decided per rack (a size change mid-rack would
+  // leave balls overlapping or apart).
+  const resetGame = window.resetGame;
+  window.resetGame = function (mode) {
+    const m = mode || gameMode;
+    const real = enabled && m !== 'online';
+    setBallScale(real ? REAL_BALL_SCALE[m === 'snooker' ? 'snooker' : 'pool'] : 1);
+    return resetGame(mode);
+  };
 }
 
 // ─── table geometry (cushion segments + pocket holes, shared with the 3D view) ────────────
 function geometry() {
   const mode = gameMode === 'snooker' ? 'snooker' : 'pool';
-  if (!geomCache || geomCache.mode !== mode || geomCache.TW !== TW) {
+  if (!geomCache || geomCache.mode !== mode || geomCache.TW !== TW || geomCache.R !== BALL_R) {
     geomCache = buildTable({ mode, TW, TH, R: BALL_R });
   }
   return geomCache;
@@ -116,11 +128,13 @@ function startReal(cx, cy, pwr) {
   // Cue strike. a = side offset (+ = shooter's left), b = height offset (+ = above centre),
   // both as fractions of R; the engine's spin panel gives spinX (+ = right), spinY (+ = low).
   const a = -spinX * SPIN_OFFSET, b = -spinY * SPIN_OFFSET;
-  const theta = Math.max(0, Math.min(70, (window.poolCue && window.poolCue.elevation) || 0)) * Math.PI / 180;
-  // Cue speed. Quadratic so the low end of the power bar stays usable: the table is short
-  // relative to the ball (~1.6 m), and with real friction even 1 m/s rolls a full length.
-  // Full power ≈ 5 m/s cue → ≈ 7.7 m/s cue ball, a hard break.
-  const V0 = (0.05 + 5.0 * (pwr / 100) ** 2) * s;
+  // Cue elevation: the 3D view publishes the effective angle (raised to clear the rail);
+  // without it (2D board) the cue is level.
+  const cue = window.poolCue || {};
+  const theta = Math.max(0, Math.min(80, cue.effective || 0)) * Math.PI / 180;
+  // Cue speed. Quadratic so the low end of the power bar is fine-grained (with real cloth even
+  // 1 m/s rolls most of a 9 ft table). Full power ≈ 4.7 m/s cue → ≈ 7 m/s cue ball: a hard break.
+  const V0 = (0.1 + 4.6 * (pwr / 100) ** 2) * s;
   const phi = Math.atan2(-dy, dx);
   strike(st[0], P, V0, phi, theta, a, b);
 
