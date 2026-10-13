@@ -407,7 +407,7 @@ function buildTable() {
 
   const cue = buildCue(R);
   g.add(cue);
-  const cueR0 = R * 0.24;
+  const cueR0 = R * 0.24, cueR1 = R * 0.62, cueL = Math.min(26 * 2 * R, 0.62 * TW);   // as buildCue
 
   T.scene.add(g);
 
@@ -419,7 +419,7 @@ function buildTable() {
   const aim = buildAimAid(R);
   g.add(aim.group);
 
-  table = { key, tw: TW, r: R, group: g, geo, meshes, ghost, overlay, overlayTex, cue, cueR0, aim, ballsRef: balls, hRail, hCush };
+  table = { key, tw: TW, r: R, group: g, geo, meshes, ghost, overlay, overlayTex, cue, cueR0, cueR1, cueL, aim, ballsRef: balls, hRail, hCush };
   cam.ready = false;
 }
 
@@ -637,19 +637,41 @@ function buildCue(R) {
   return cue;
 }
 
-// Lowest cue elevation (deg) that clears the cushion nose and the rail behind the cue ball,
-// for a tip contact at height R + vert. The cue rises from the contact point, so the binding
-// spots are where it passes over the cushion nose and the start of the wooden rail.
-function railClearance(cx, cy, ax, ay, vert, into) {
-  const f = table.geo.faces, bx = -ax, by = -ay;
+// Lowest cue elevation (deg) that keeps the cue clear of the cushion, the rail and any ball
+// behind the cue ball, for a tip contact at height R + vert, offset sideways by `side`.
+function cueClearance(cx, cy, ax, ay, side, vert, into) {
+  const f = table.geo.faces, bx = -ax, by = -ay, R = BALL_R, hc = R + vert;
+  const cueR = x => table.cueR0 + (table.cueR1 - table.cueR0) * Math.min(1, Math.max(0, x) / table.cueL) + 0.4;
+  let need = 0;
+
+  // Cushion nose and rail: the cue rises from the contact point, so the binding spots are where
+  // it passes over the cushion nose and the start of the wooden rail.
   let t = Infinity;                                  // ball centre → cushion line, behind the ball
   if (bx < -1e-6) t = Math.min(t, (f.L - cx) / bx); else if (bx > 1e-6) t = Math.min(t, (f.R - cx) / bx);
   if (by < -1e-6) t = Math.min(t, (f.T - cy) / by); else if (by > 1e-6) t = Math.min(t, (f.B - cy) / by);
-  const x = t - into, R = BALL_R, hc = R + vert, rc = table.cueR0 * 1.6 + 0.4;
+  const x = t - into;
   if (x <= 0.3) return 85;
-  const a1 = Math.atan2(table.hCush + rc - hc, x);
-  const a2 = Math.atan2(table.hRail + rc - hc, x + table.geo.cushionWidth);
-  return Math.min(85, Math.max(0, a1, a2) / DEG);
+  need = Math.max(need,
+    Math.atan2(table.hCush + cueR(x) - hc, x),
+    Math.atan2(table.hRail + cueR(x) - hc, x + table.geo.cushionWidth));
+
+  // Balls behind the cue ball: the cue line (in the vertical plane through the cue, rising at θ
+  // from the contact point) must pass at least R + cue radius from each ball's centre.
+  for (let i = 1; i < balls.length; i++) {
+    const b = balls[i];
+    if (!b.active || b.falling) continue;
+    const ox = b.x - cx, oy = b.y - cy;
+    const back = -(ox * ax + oy * ay) - into;        // along the cue, from the contact point
+    if (back < -R || back > table.cueL) continue;
+    const lat = Math.abs(ox * -ay + oy * ax - side);  // sideways from the cue's plane
+    const clear = R + cueR(back);
+    if (lat >= clear) continue;
+    const D = Math.sqrt(clear * clear - lat * lat);   // required in-plane distance
+    const A = back, B = hc - R, H = Math.hypot(A, B);
+    if (D >= H) return 85;                           // ball right behind the tip: as steep as it gets
+    need = Math.max(need, Math.asin(D / H) - Math.atan2(B, A));
+  }
+  return Math.min(85, Math.max(0, need) / DEG);
 }
 
 // Cue stroke, in "gap" = distance from the tip back to the contact point on the ball:
@@ -716,8 +738,8 @@ function updateCue(now, dt) {
   let gap, elevDeg;
   if (aiming) {
     gap = cueGap(now, dt);
-    // Raise the cue as far as needed to clear the rail (published for the physics).
-    view.railMin = railClearance(cx, cy, ax, ay, vert, into);
+    // Raise the cue as far as needed to clear the rail and balls (published for the physics).
+    view.railMin = cueClearance(cx, cy, ax, ay, side, vert, into);
     elevDeg = Math.max(window.poolCue.elevation, view.railMin);
     window.poolCue.effective = elevDeg;
   } else {
@@ -1040,7 +1062,7 @@ function updateHud() {
   el.style.display = aiming && eff === 'aim' ? 'flex' : 'none';
   const e = window.poolCue.effective != null ? window.poolCue.effective : window.poolCue.elevation;
   const raised = view.railMin > window.poolCue.elevation + 0.5;
-  el.querySelector('span').textContent = e.toFixed(0) + '°' + (raised ? ' · rail ([ = hit higher)' : '');
+  el.querySelector('span').textContent = e.toFixed(0) + '°' + (raised ? ' · raised to clear ([ = hit higher)' : '');
   const line = el.querySelector('.v3d-elev-cue');
   line.setAttribute('x2', (58 - Math.cos(e * DEG) * 50).toFixed(1));
   line.setAttribute('y2', (30 - Math.sin(e * DEG) * 50).toFixed(1));
@@ -1158,8 +1180,8 @@ function onKeyDown(e) {
   if (e.key === '[' || e.key === ']') {
     const c = window.poolCue;
     if (e.key === '[' && view.railMin > c.elevation + 0.5 && spinY > -0.9) {
-      // The rail is holding the cue up: keep it low by striking higher on the ball (topspin),
-      // as a player does when the cue ball is near a cushion.
+      // The rail or a ball is holding the cue up: keep it low by striking higher on the ball
+      // (topspin), as a player does when the cue ball is near a cushion.
       spinY = Math.max(-Math.sqrt(Math.max(0.88 - spinX * spinX, 0)), spinY - 0.12);
       drawSpinPanel();
       return;

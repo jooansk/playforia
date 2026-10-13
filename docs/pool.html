@@ -3,10 +3,22 @@
 <head>
 <meta charset="utf-8">
 <title>8-Ball Pool</title>
-<link rel="stylesheet" href="src/games/pool/pool.css">
-<!-- three.js is vendored (docs/vendor/three) and only fetched when the 3D view is on. -->
+<link rel="stylesheet" href="src/games/pool/pool.css?v=20261013-5">
+<!-- Import map: three.js is vendored (docs/vendor/three) and only fetched when the 3D view is on.
+     Every module URL also maps to a ?v= stamped one (as do the engine script and stylesheet), so
+     a reload never mixes fresh and cached files: GitHub Pages and preview CDNs cache each file
+     separately. Bump the version (all "v=20261013-5" in this file) whenever a release changes code. -->
 <script type="importmap">
-{ "imports": { "three": "./vendor/three/three.module.min.js", "three/addons/": "./vendor/three/addons/" } }
+{ "imports": {
+    "three": "./vendor/three/three.module.min.js",
+    "three/addons/": "./vendor/three/addons/",
+    "./src/platform/GameShell.js": "./src/platform/GameShell.js?v=20261013-5",
+    "./src/platform/Lobby.js": "./src/platform/Lobby.js?v=20261013-5",
+    "./src/platform/progression.js": "./src/platform/progression.js?v=20261013-5",
+    "./src/games/pool/physics-real.js": "./src/games/pool/physics-real.js?v=20261013-5",
+    "./src/games/pool/view3d.js": "./src/games/pool/view3d.js?v=20261013-5",
+    "./src/games/pool/tablegeom.js": "./src/games/pool/tablegeom.js?v=20261013-5"
+} }
 </script>
 </head>
 <body>
@@ -185,7 +197,7 @@ GameShell.boot({
   status: 'Pool',
   boardHTML: document.getElementById('pool-board').innerHTML,
   footer: document.getElementById('pool-footer').content.firstElementChild.cloneNode(true),
-  engineSrc: 'src/games/pool/game.js',
+  engineSrc: 'src/games/pool/game.js?v=20261013-5',
   onEngineLoad: installExtras,
 });
 
