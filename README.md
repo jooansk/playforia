@@ -24,8 +24,10 @@ or `?view=2d` / `?view=3d` in the URL):
   - hold **Space** or the **right mouse button** (or the *Hold to shoot* button) to charge: the cue saws back and
     forth, with longer strokes as the power builds. Release to shoot: the cue drives through the ball
   - **[ / ]**: cue elevation · **← →**: fine aim · **mouse wheel**: step closer/back · **V**: switch view
-  - near a cushion the cue rises automatically to clear the rail (almost vertical for a centre hit on a
-    frozen ball); press **[** to keep it lower by striking higher on the ball (topspin)
+  - the cue never passes through the rail or other balls. With the spin left at centre, a cue ball near
+    the rail (or behind another ball) is struck higher, with topspin, so the cue stays almost level; with a
+    spin you picked, the cue rises just enough instead (about 30° for a centre hit on a ball frozen to the
+    rail). **[** moves the tip higher on the ball by hand
 - **Top camera:** point-and-click like the 2D board. It is also used automatically for ball-in-hand placement.
 
 The 3D table has its own pocket system (round holes behind angled jaws, sized like a real table),
