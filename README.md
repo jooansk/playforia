@@ -11,6 +11,40 @@ Game play images:
 
 ![Alt Text](Guide_ON.png "Cheating tool")
 
+### 3D view & realistic physics
+
+The game now opens in a **three.js 3D view** (switch with **🎥 3D view / ▦ 2D view** in the side panel,
+or `?view=2d` / `?view=3d` in the URL):
+
+- **Cue camera (default):** a player's-eye view: low behind the cue ball, looking down the cue line
+  (it leans over the rail when the cue ball is near a cushion). After the strike the camera steps
+  back to show the whole table. While aiming, a line runs to the exact contact point, with a ghost
+  ball and short lines showing where the object ball and the cue ball will go.
+  - drag: aim (hold **Shift** for fine aim; vertical drag raises/lowers your eye)
+  - hold **Space** or the **right mouse button** (or the *Hold to shoot* button) to charge: the cue saws back and
+    forth, with longer strokes as the power builds. Release to shoot: the cue drives through the ball
+  - **[ / ]**: cue elevation · **← →**: fine aim · **mouse wheel**: step closer/back · **V**: switch view
+  - the cue never passes through the rail or other balls. With the spin left at centre, a cue ball near
+    the rail (or behind another ball) is struck higher, with topspin, so the cue stays almost level; with a
+    spin you picked, the cue rises just enough instead (about 30° for a centre hit on a ball frozen to the
+    rail). **[** moves the tip higher on the ball by hand
+- **Top camera:** point-and-click like the 2D board. It is also used automatically for ball-in-hand placement.
+
+The 3D table has its own pocket system (round holes behind angled jaws, sized like a real table),
+and the realistic physics uses exactly the same geometry, so what you see is what the balls bounce off
+and drop into. The Guide and assist lines are the engine's own, projected onto the cloth.
+
+With **Physics: Real**, local games are played on a regulation-size table: the cloth area stays the
+same and the balls shrink to real proportions (a 9 ft pool table is ~44 × 22 ball widths; 12 ft snooker ~68 × 34).
+The original Playforia proportions are closer to a 6 ft bar table, and Classic and online games keep them.
+
+**⚙ Physics: Real** (default for local games) uses the
+[pooltool model](https://ekiefl.github.io/2020/04/24/pooltool-theory/): balls slide, roll and spin
+with sliding/rolling/spinning friction; the cue strike transfers top/back/side spin (draw, follow,
+stun and english work); and cushions use Han's 2005 impulse model. **Classic** is the original
+Playforia engine. **Online games always use Classic**, because both players' clients must simulate
+every shot identically.
+
 Test the current development:
 https://jooansk.github.io/playforia/
 

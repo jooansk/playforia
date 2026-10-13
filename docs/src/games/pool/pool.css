@@ -215,3 +215,34 @@ canvas#gc { display: block; cursor: crosshair; }
 #chat-input-row button { background:#1a3858; border:none; border-left:1px solid #1a4070;
   color:#8ab; padding:0 14px; cursor:pointer; font-size:11px; white-space:nowrap; }
 #chat-input-row button:hover { background:#204070; }
+/* ── 3D view (view3d.js) — the board grows to --bw × --bh; #gc stays mounted (hidden) ──
+   because the engine reads its own events/coords from it and draws the cloth overlay into it. */
+body.v3d #canvas-wrap { width: var(--bw); height: var(--bh); overflow: hidden; background: #120e0b; }
+body.v3d #infobar { width: calc(var(--bw) + 135px) !important; }
+body.v3d #bottom-row, body.v3d #scoreboard { width: calc(var(--bw) + 135px); }
+body.v3d #chat-panel { width: var(--bw); }
+body.v3d canvas#gc { position: absolute; left: 0; top: 0; visibility: hidden; pointer-events: none; }
+body.v3d #msg { z-index: 20; }
+#v3d-canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; z-index: 1;
+  touch-action: none; cursor: grab; }
+#v3d-hud { position: absolute; inset: 0; z-index: 5; pointer-events: none; font-family: Arial, sans-serif; }
+#v3d-hud button { pointer-events: auto; }
+.v3d-views { position: absolute; top: 8px; left: 8px; display: flex; gap: 4px; }
+.v3d-views button { background: rgba(6,20,12,.72); border: 1px solid rgba(120,200,140,.35); color: #bfe6c6;
+  border-radius: 4px; padding: 4px 9px; font-size: 11px; cursor: pointer; }
+.v3d-views button.on { background: rgba(40,120,60,.85); color: #fff; border-color: #7ad08a; }
+.v3d-count { position: absolute; top: 9px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,.55);
+  color: #fff; font-size: 12px; font-weight: bold; padding: 4px 12px; border-radius: 10px; }
+.v3d-power { position: absolute; right: 14px; top: 50%; transform: translateY(-50%); width: 16px; height: 46%;
+  background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.45); border-radius: 3px;
+  display: flex; flex-direction: column; justify-content: flex-end; }
+.v3d-power-fill { width: 100%; height: 0; border-radius: 2px; }
+.v3d-power span { position: absolute; top: 100%; right: -6px; margin-top: 4px; color: #fff; font-size: 10px;
+  text-shadow: 0 1px 2px #000; }
+.v3d-elev { position: absolute; right: 44px; bottom: 12px; display: flex; flex-direction: column; align-items: center;
+  color: #dfe; font-size: 11px; text-shadow: 0 1px 2px #000; }
+.v3d-shoot { position: absolute; left: 50%; bottom: 12px; transform: translateX(-50%);
+  background: linear-gradient(#5cc832,#2e8a10); border: 1px solid #1f6608; color: #fff; font-weight: 700;
+  border-radius: 18px; padding: 7px 18px; font-size: 12px; cursor: pointer; touch-action: none;
+  box-shadow: 0 2px 8px rgba(0,0,0,.5); opacity: .85; }
+.v3d-shoot:active { filter: brightness(1.2); }

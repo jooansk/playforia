@@ -129,14 +129,16 @@ export class GameShell {
 
 // Convenience: build a shell, inject HTML/nodes into its board slot, and (optionally)
 // load a classic-script engine AFTER the DOM exists — preserving the load ordering the
-// engine relies on (its load-time code queries #srvStatus etc.). Returns the shell.
-GameShell.boot = function boot({ parent = document.body, status, boardHTML = '', footer = null, engineSrc = null } = {}) {
+// engine relies on (its load-time code queries #srvStatus etc.). `onEngineLoad` runs once the
+// engine script has executed (its globals exist). Returns the shell.
+GameShell.boot = function boot({ parent = document.body, status, boardHTML = '', footer = null, engineSrc = null, onEngineLoad = null } = {}) {
   const shell = new GameShell({ status }).mount(parent);
   if (boardHTML) shell.boardSlot.innerHTML = boardHTML;
   if (footer) shell.root.appendChild(footer);
   if (engineSrc) {
     const s = document.createElement('script');
     s.src = engineSrc;
+    if (onEngineLoad) s.addEventListener('load', onEngineLoad);
     document.body.appendChild(s);     // runs now that the chrome DOM exists
   }
   return shell;
