@@ -6,20 +6,21 @@
 //   • WRITES input back the way the 2D board does: synthetic mouse events on #gc, so cue-ball
 //     placement, shooting and online intents all go through the engine's own handlers. In
 //     the cue camera the aim point (mx,my) is set from the camera heading instead;
-//   • REUSES the engine's 2D overlay drawing (aim guide, assist lines, placement guides):
-//     it is rendered into #gc at 2× and laid on the cloth as a texture.
-// The table (cushion faces, jaws, pockets) is traced from the engine's own collision mask,
-// so what you see is exactly what the balls bounce off.
+//   • REUSES the engine's 2D overlay drawing (Guide/assist lines, placement guides): it is
+//     rendered into #gc at 2× and laid on the cloth as a texture. The basic aim line, ghost
+//     ball and ball directions are drawn in 3D (updateAimAid).
+// The table (cushion faces, jaws, round pockets) comes from tablegeom.js, the same geometry
+// the realistic physics collides with, so what you see is what the balls bounce off.
 //
 // Engine globals used (classic-script lexical scope is shared with modules): balls gState S
-// TW TH BALL_R BALL_D PCAPT BORDER gameMode mx my mdown power spinX spinY cheatMode freeBall
-// rackBallId countPoints countTarget countShots ctx maskIs isValidPlacement
-// localControlsTurn applyAssist drawAimAssist drawAssistChain aimLineEnd HEAD_STRING_X
+// TW TH BALL_R BALL_D PCAPT BORDER gameMode mx my mdown power spinX spinY freeBall
+// rackBallId countPoints countTarget countShots ctx isValidPlacement
+// localControlsTurn applyAssist drawAimAssist drawAssistChain HEAD_STRING_X
 // SNK_BAULK_X SNK_D_CY SNK_D_R SNOOKER_SPOTS POOL_FOOT_X POOL_FOOT_Y
 
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { traceTable, PLAY, RAIL, POCKET } from './tablegeom.js';
+import { buildTable as buildGeometry, inPoly } from './tablegeom.js';
 
 const OVERLAY_SCALE = 2;       // #gc supersampling while it serves as the cloth overlay
 const DEG = Math.PI / 180;
@@ -284,6 +285,7 @@ function buildRoom() {
   }
   lamp.position.y = 430;
   room.add(lamp);
+  T.lamp = lamp;
   T.fill1.position.set(-210, 400, 0);
   T.fill2.position.set(210, 400, 0);
 
@@ -291,39 +293,31 @@ function buildRoom() {
   T.room = room;
 }
 
-// ─── table (rebuilt from the mask for pool / snooker) ──────────────────────────────
+// ─── table (rebuilt for pool / snooker) ─────────────────────────────────────────────
 function buildTable() {
   if (table) {
     T.scene.remove(table.group);
     table.group.traverse(o => { if (o.geometry) o.geometry.dispose(); });
   }
   const key = gameMode === 'snooker' ? 'snooker' : 'pool';
-  const cw = Math.max(7, BALL_R * 1.1);
-  const geo = traceTable({
-    w: TW, h: TH, cushionWidth: cw,
-    cell: (x, y) => (maskIs(x, y, 0) ? PLAY : maskIs(x, y, 2) ? POCKET : RAIL),
-  });
+  const geo = buildGeometry({ mode: key, TW, TH, R: BALL_R });
   const R = BALL_R;
   const hCush = R * 1.28, hRail = hCush + R * 0.3, ext = RAIL_EXT;
   const g = new THREE.Group();
   g.position.set(-TW / 2, 0, -TH / 2);
 
-  const at = geo.at;
-  const isCushAt = (x, y) => {
-    const ix = Math.round(x), iy = Math.round(y);
-    return ix >= 0 && iy >= 0 && ix < TW && iy < TH && geo.isCush[iy * TW + ix] === 1;
-  };
+  const nearPocket = (x, y, pad) => geo.pockets.some(p => Math.hypot(x - p.x, y - p.y) < p.r + pad);
   const inTable = (x, y) => x >= -ext && y >= -ext && x <= TW + ext && y <= TH + ext;
 
-  // Cloth.
+  // Cloth (the bed, with the pocket holes cut out).
   const feltTex = makeFeltTexture(key);
   const feltMat = new THREE.MeshStandardMaterial({ map: feltTex, roughness: 0.95 });
   const feltUV = (x, y) => [x / TW, 1 - y / TH];
-  const felt = new THREE.Mesh(capGeometry(geo.feltVisual, [], 0, feltUV), feltMat);
+  const felt = new THREE.Mesh(capGeometry(geo.felt, [], 0, feltUV), feltMat);
   felt.receiveShadow = true;
   g.add(felt);
 
-  // Cushions: cloth-covered tops, cloth faces toward the bed, dark ends at the pockets.
+  // Cushions: cloth-covered tops and faces (the jaws too).
   const feltCol = new THREE.Color(FELT[key]);
   const faceCol = '#' + feltCol.clone().multiplyScalar(0.72).getHexString();
   const cushTop = new THREE.MeshStandardMaterial({ map: feltTex, color: '#cfcfcf', roughness: 0.95 });
@@ -331,32 +325,30 @@ function buildTable() {
   for (const ring of geo.cushions) {
     const top = new THREE.Mesh(capGeometry(ring, [], hCush, feltUV), cushTop);
     top.receiveShadow = true; g.add(top);
-    const side = new THREE.Mesh(wallGeometry([ring], 0, hCush, isCushAt,
-      (x, y) => (at(x, y) === POCKET ? LEATHER : faceCol)), wallMat);
+    const side = new THREE.Mesh(wallGeometry([ring], 0, hCush, (x, y) => inPoly(ring, x, y), () => faceCol), wallMat);
     side.receiveShadow = true; g.add(side);
   }
 
-  // Wooden rail with the pocket cut-outs; diamonds + leather pocket surrounds in its texture.
+  // Wooden rail around everything, cut out for cloth + cushions + pockets; leather-lined
+  // pocket cuts, diamonds and leather pocket surrounds in its texture.
   const outer = [[-ext, -ext], [TW + ext, -ext], [TW + ext, TH + ext], [-ext, TH + ext]];
-  const railTex = makeRailTexture(geo, ext, cw);
+  const railTex = makeRailTexture(geo, ext);
   const railUV = (x, y) => [(x + ext) / (TW + 2 * ext), 1 - (y + ext) / (TH + 2 * ext)];
   const rail = new THREE.Mesh(capGeometry(outer, [geo.opening], hRail, railUV),
     new THREE.MeshStandardMaterial({ map: railTex, roughness: 0.35, metalness: 0.05 }));
   rail.castShadow = true; rail.receiveShadow = true; g.add(rail);
-  const railSolid = (x, y) => {
-    if (!inTable(x, y)) return false;
-    if (x < 0 || y < 0 || x >= TW || y >= TH) return true;
-    return at(x, y) === RAIL && !isCushAt(x, y);
-  };
+  const railSolid = (x, y) => inTable(x, y) && !inPoly(geo.opening, x, y);
   g.add(new THREE.Mesh(wallGeometry([outer], 0, hRail, railSolid, () => WOOD), wallMat));
   g.add(new THREE.Mesh(wallGeometry([geo.opening], 0, hRail, railSolid,
-    (x, y) => (at(x, y) === POCKET ? LEATHER : WOOD), true), wallMat));
+    (x, y) => (nearPocket(x, y, 8) ? LEATHER : WOOD), true), wallMat));
 
-  // Pocket wells.
+  // Pocket wells: round holes, dark and deep enough to swallow a ball.
   const depth = BALL_D * 1.6;
   const pocketMat = new THREE.MeshStandardMaterial({ color: POCKET_DARK, roughness: 1 });
-  for (const ring of geo.pockets) {
-    g.add(new THREE.Mesh(wallGeometry([ring], -depth, 0.01, (x, y) => at(x, y) !== POCKET, () => POCKET_DARK, true), wallMat));
+  for (const p of geo.pockets) {
+    const ring = [];
+    for (let i = 0; i < 40; i++) ring.push([p.x + Math.cos(i / 40 * Math.PI * 2) * p.r, p.y + Math.sin(i / 40 * Math.PI * 2) * p.r]);
+    g.add(new THREE.Mesh(wallGeometry([ring], -depth, 0.01, (x, y) => Math.hypot(x - p.x, y - p.y) > p.r, () => POCKET_DARK, true), wallMat));
     g.add(new THREE.Mesh(capGeometry(ring, [], -depth, () => [0, 0]), pocketMat));
   }
 
@@ -416,7 +408,10 @@ function buildTable() {
   sc.left = -TW / 2 - 120; sc.right = TW / 2 + 120; sc.top = TH / 2 + 120; sc.bottom = -TH / 2 - 120;
   sc.near = 300; sc.far = 1400; sc.updateProjectionMatrix();
 
-  table = { key, tw: TW, group: g, meshes, ghost, overlay, overlayTex, cue, ballsRef: balls, hRail };
+  const aim = buildAimAid(R);
+  g.add(aim.group);
+
+  table = { key, tw: TW, group: g, geo, meshes, ghost, overlay, overlayTex, cue, aim, ballsRef: balls, hRail };
   cam.ready = false;
 }
 
@@ -504,7 +499,7 @@ function makeFeltTexture(key) {
   });
 }
 
-function makeRailTexture(geo, ext, cw) {
+function makeRailTexture(geo, ext) {
   const s = 3, W = (TW + 2 * ext) * s, H = (TH + 2 * ext) * s;
   return canvasTex(W, H, (g) => {
     woodGrain(g, W, H, WOOD, false);
@@ -513,26 +508,16 @@ function makeRailTexture(geo, ext, cw) {
       g.save(); g.beginPath(); g.rect(x0, 0, (30 + ext) * s, H); g.clip();
       woodGrain(g, W, H, WOOD, true); g.restore();
     }
-    // Leather around the pockets: a smooth band from the (bilinearly sampled) pocket distance.
-    const img = g.getImageData(0, 0, W, H), d = img.data;
-    const lr = parseInt(LEATHER.slice(1, 3), 16), lg = parseInt(LEATHER.slice(3, 5), 16), lb = parseInt(LEATHER.slice(5, 7), 16);
-    const dist = (x, y) => {
-      const x0 = Math.floor(x), y0 = Math.floor(y), fx = x - x0, fy = y - y0;
-      const at = (i, j) => geo.distP[Math.min(TH - 1, Math.max(0, j)) * TW + Math.min(TW - 1, Math.max(0, i))];
-      return (at(x0, y0) * (1 - fx) + at(x0 + 1, y0) * fx) * (1 - fy) + (at(x0, y0 + 1) * (1 - fx) + at(x0 + 1, y0 + 1) * fx) * fy;
-    };
-    for (let py = 0; py < H; py++) for (let px = 0; px < W; px++) {
-      const x = px / s - ext, y = py / s - ext;
-      if (x < -1 || y < -1 || x > TW || y > TH) continue;
-      const a = Math.min(1, Math.max(0, (5.2 - dist(x, y)) / 1.2));
-      if (a <= 0) continue;
-      const i = (py * W + px) * 4;
-      d[i] += (lr - d[i]) * a; d[i + 1] += (lg - d[i + 1]) * a; d[i + 2] += (lb - d[i + 2]) * a;
+    // Leather pocket surrounds: a soft-edged ring around each hole.
+    for (const p of geo.pockets) {
+      const X = (p.x + ext) * s, Y = (p.y + ext) * s;
+      const gr = g.createRadialGradient(X, Y, p.r * s, X, Y, (p.r + 7) * s);
+      gr.addColorStop(0, LEATHER); gr.addColorStop(0.75, LEATHER); gr.addColorStop(1, 'rgba(42,28,18,0)');
+      g.fillStyle = gr; g.beginPath(); g.arc(X, Y, (p.r + 7) * s, 0, Math.PI * 2); g.fill();
     }
-    g.putImageData(img, 0, 0);
     // Diamonds (sights) at eighths of the long rails and quarters of the short ones.
-    const railMid = (-ext + (BORDER - cw)) / 2;
-    const px0 = (PX[0] + PX[3]) / 2, px2 = (PX[2] + PX[5]) / 2, py0 = PY[0], py1 = PY[3];
+    const f = geo.faces, railMid = (-ext + (f.T - geo.cushionWidth)) / 2;
+    const px0 = geo.pockets[0].x, px2 = geo.pockets[2].x, py0 = geo.pockets[0].y, py1 = geo.pockets[5].y;
     g.fillStyle = '#efe6cf';
     const diamond = (x, y) => {
       const X = (x + ext) * s, Y = (y + ext) * s, r = 2.2 * s;
@@ -688,6 +673,108 @@ function updateGhost() {
   gh.material.opacity = ok ? 0.55 : 0.35;
 }
 
+// ─── aim aid: line to the contact point, ghost ball, and where both balls head ──────
+// Always on while aiming (the Guide button adds the engine's longer predicted paths).
+function buildAimAid(R) {
+  const group = new THREE.Group();
+  const mk = (color, opacity, radius) => {
+    const m = new THREE.Mesh(new THREE.CylinderGeometry(radius, radius, 1, 10, 1, true),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false, toneMapped: false }));
+    m.renderOrder = 3; group.add(m); return m;
+  };
+  const line = mk('#ffffff', 0.85, R * 0.07);
+  const objLine = mk('#ffd23f', 0.9, R * 0.07);
+  const cueLine = mk('#7fdcff', 0.75, R * 0.06);
+  const ghost = new THREE.Mesh(new THREE.SphereGeometry(R, 32, 16), new THREE.MeshBasicMaterial({
+    color: '#ffffff', transparent: true, opacity: 0.28, depthWrite: false, toneMapped: false }));
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(R, R * 0.06, 6, 40), new THREE.MeshBasicMaterial({
+    color: '#ffffff', transparent: true, opacity: 0.9, toneMapped: false }));
+  ring.rotation.x = Math.PI / 2;
+  group.add(ghost, ring);
+  group.visible = false;
+  return { group, line, objLine, cueLine, ghost, ring };
+}
+
+const _a = new THREE.Vector3(), _b = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
+function placeLine(m, x1, z1, x2, z2, y) {
+  _a.set(x1, y, z1); _b.set(x2, y, z2);
+  const len = _a.distanceTo(_b);
+  m.visible = len > 0.5;
+  if (!m.visible) return;
+  m.position.copy(_a).add(_b).multiplyScalar(0.5);
+  m.scale.set(1, len, 1);
+  m.quaternion.setFromUnitVectors(_up, _b.sub(_a).normalize());
+}
+
+// First thing the cue ball's centre meets along (dx,dy): a ball (at 2R) or a cushion (at R).
+function castCue(cx, cy, dx, dy) {
+  const R = BALL_R;
+  let best = { t: 1e9, ball: -1 };
+  for (let i = 1; i < balls.length; i++) {
+    const b = balls[i];
+    if (!b.active || b.falling) continue;
+    const ox = b.x - cx, oy = b.y - cy, along = ox * dx + oy * dy;
+    if (along <= 0) continue;
+    const perp2 = ox * ox + oy * oy - along * along, rr = 4 * R * R;
+    if (perp2 >= rr) continue;
+    const t = along - Math.sqrt(rr - perp2);
+    if (t > 0 && t < best.t) best = { t, ball: i };
+  }
+  for (const sg of table.geo.segs) {
+    // Ray vs. capsule of radius R around the segment (sampled: offset lines + end caps).
+    const t = rayCapsule(cx, cy, dx, dy, sg, R);
+    if (t > 0 && t < best.t) best = { t, ball: -1 };
+  }
+  return best;
+}
+
+function rayCapsule(cx, cy, dx, dy, sg, R) {
+  let best = Infinity;
+  const ex = sg.x2 - sg.x1, ey = sg.y2 - sg.y1, L = Math.hypot(ex, ey);
+  const ux = ex / L, uy = ey / L, nx = -uy, ny = ux;
+  for (const side of [1, -1]) {
+    const ox = sg.x1 + nx * R * side, oy = sg.y1 + ny * R * side;
+    const den = dx * uy - dy * ux;                        // ray ∥ cushion → no hit
+    if (Math.abs(den) < 1e-9) continue;
+    const t = ((ox - cx) * uy - (oy - cy) * ux) / den;
+    if (t <= 1e-6) continue;
+    const s = (cx + dx * t - sg.x1) * ux + (cy + dy * t - sg.y1) * uy;
+    if (s >= 0 && s <= L) best = Math.min(best, t);
+  }
+  for (const [px, py] of [[sg.x1, sg.y1], [sg.x2, sg.y2]]) {
+    const ox = px - cx, oy = py - cy, along = ox * dx + oy * dy;
+    const perp2 = ox * ox + oy * oy - along * along;
+    if (along > 0 && perp2 < R * R) best = Math.min(best, along - Math.sqrt(R * R - perp2));
+  }
+  return best;
+}
+
+function updateAimAid() {
+  const A = table.aim, cu = balls[0];
+  const aiming = gState === S.AIM && localControlsTurn() && cu && cu.active && mx >= 0;
+  const dx0 = mx - (cu ? cu.x : 0), dy0 = my - (cu ? cu.y : 0), len = Math.hypot(dx0, dy0);
+  if (!aiming || len < 1) { A.group.visible = false; return; }
+  A.group.visible = true;
+  const R = BALL_R, dx = dx0 / len, dy = dy0 / len;
+  const hit = castCue(cu.x, cu.y, dx, dy);
+  const t = Math.min(hit.t, 2000);
+  const gx = cu.x + dx * t, gy = cu.y + dy * t;
+  placeLine(A.line, cu.x, cu.y, gx, gy, R);
+  A.ghost.position.set(gx, R, gy);
+  A.ring.position.set(gx, 0.4, gy);
+  if (hit.ball > 0) {
+    // Object ball leaves along the line of centres; the cue ball along the tangent (stun).
+    const b = balls[hit.ball], nx = (b.x - gx) / (2 * R), ny = (b.y - gy) / (2 * R);
+    const ol = BALL_D * 4;
+    placeLine(A.objLine, b.x, b.y, b.x + nx * ol, b.y + ny * ol, R);
+    const tx = dx - (dx * nx + dy * ny) * nx, ty = dy - (dx * nx + dy * ny) * ny, tl = Math.hypot(tx, ty);
+    if (tl > 0.05) placeLine(A.cueLine, gx, gy, gx + (tx / tl) * BALL_D * 2.5 * tl, gy + (ty / tl) * BALL_D * 2.5 * tl, R);
+    else A.cueLine.visible = false;
+  } else {
+    A.objLine.visible = false; A.cueLine.visible = false;
+  }
+}
+
 // ─── the engine's overlay, re-targeted onto the cloth ──────────────────────────────
 function drawOverlay() {
   const k = OVERLAY_SCALE;
@@ -699,14 +786,6 @@ function drawOverlay() {
   if (gState === S.AIM && myTurn && balls[0] && balls[0].active && mx >= 0) {
     drawAimAssist();
     drawAssistChain();
-    if (!cheatMode) {
-      const cu = balls[0], dx = cu.x - mx, dy = cu.y - my, len = Math.hypot(dx, dy);
-      if (len >= 1) {
-        const [ex, ey] = aimLineEnd(cu.x, cu.y, -dx / len, -dy / len);
-        ctx.setLineDash([5, 5]); ctx.strokeStyle = 'rgba(255,255,255,0.45)'; ctx.lineWidth = 1;
-        ctx.beginPath(); ctx.moveTo(cu.x, cu.y); ctx.lineTo(ex, ey); ctx.stroke(); ctx.setLineDash([]);
-      }
-    }
   }
   if (gState === S.PLACE && myTurn && gameMode !== 'snooker' && !freeBall) {
     ctx.setLineDash([4, 4]); ctx.strokeStyle = 'rgba(255,255,255,0.35)'; ctx.lineWidth = 1;
@@ -768,18 +847,26 @@ function updateCamera(dt) {
     const yaw = Math.atan2(my - cu.y, mx - cu.x);
     const ahead = BALL_D * 2.5;
     wantTgt.set(cu.x + Math.cos(yaw) * ahead + off.x, BALL_R, cu.y + Math.sin(yaw) * ahead + off.z);
-    orbit(new THREE.Vector3(cu.x + off.x, BALL_R, cu.y + off.z), yaw, view.pitch, view.dist * BALL_D, wantPos);
+    // Keep the eye above the cue (which rises at the cue elevation) so it never fills the view,
+    // and lean over the rail when the cue ball is close to it, like a player would.
+    const f = table.geo.faces, bx = -Math.cos(yaw), by = -Math.sin(yaw);
+    let edge = Infinity;                                   // cue ball → cushion line, behind it
+    if (bx < -1e-6) edge = Math.min(edge, (f.L - cu.x) / bx); else if (bx > 1e-6) edge = Math.min(edge, (f.R - cu.x) / bx);
+    if (by < -1e-6) edge = Math.min(edge, (f.T - cu.y) / by); else if (by > 1e-6) edge = Math.min(edge, (f.B - cu.y) / by);
+    const overRail = edge < view.dist * BALL_D ? Math.atan2(table.hRail + BALL_R * 0.5 - BALL_R, Math.max(edge, 1)) : 0;
+    const pitch = Math.max(view.pitch, (window.poolCue.elevation + 7) * DEG, overRail);
+    orbit(new THREE.Vector3(cu.x + off.x, BALL_R, cu.y + off.z), yaw, pitch, view.dist * BALL_D, wantPos);
     wantPos.y = Math.max(wantPos.y, table.hRail + 4);
     rate = input.drag ? 30 : 9;
   } else if (eff === 'freeze') {
-    // After the strike the player straightens up to watch: rise and step back a little,
-    // still facing along the shot line.
+    // After the strike the player steps back to take in the whole table, still facing
+    // the way the shot went.
     const f = view.shotFrom;
     if (f) {
-      const pivot = new THREE.Vector3(f.x + off.x, BALL_R, f.y + off.z);
-      wantTgt.set(f.x + Math.cos(f.yaw) * BALL_D * 9 + off.x, 0, f.y + Math.sin(f.yaw) * BALL_D * 9 + off.z);
-      orbit(pivot, f.yaw, Math.max(view.pitch, 30 * DEG), view.dist * BALL_D * 1.7, wantPos);
-      rate = 1.4;
+      const yaw = f.yaw, pitch = 50 * DEG;
+      wantTgt.set(0, 0, 0);
+      orbit(wantTgt, yaw, pitch, fitDistance(yaw, pitch) * 1.02, wantPos);
+      rate = 2.2;
     } else { wantPos.copy(cam.pos); wantTgt.copy(cam.target); }
   } else if (eff === 'top') {
     wantTgt.set(0, 0, 18);
@@ -794,6 +881,7 @@ function updateCamera(dt) {
   cam.pos.lerp(wantPos, k); cam.target.lerp(wantTgt, k);
   T.camera.position.copy(cam.pos);
   T.camera.lookAt(cam.target);
+  T.lamp.visible = cam.pos.y < T.lamp.position.y - 60;   // don't let the shade block the overview
   if (eff !== 'freeze') view.lastEff = eff;
 }
 
@@ -1018,6 +1106,7 @@ function renderFrame() {
   updateBalls();
   updateCue(now);
   updateGhost();
+  updateAimAid();
   updateCamera(dt);
   updateHud();
   T.renderer.render(T.scene, T.camera);

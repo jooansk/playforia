@@ -25,7 +25,7 @@
 // game.js) for wrappers, and drives the same engine state the rules read: balls[i].x/y,
 // active/falling, firstHit, pocketed, cueScratch, and the per-ball cueStruck/banked flags.
 
-import { traceTable, PLAY, RAIL, POCKET } from './tablegeom.js';
+import { buildTable, pocketAt } from './tablegeom.js';
 
 const KEY = 'pool-physics';
 const G = 9.81;                         // m/s²
@@ -47,7 +47,7 @@ let enabled = loadPref();
 let installed = false;
 let classic = null;      // { start, step } — the engine's own functions
 let sim = null;          // running shot (null when idle)
-let geomCache = null;    // { key, segs } traced from the current mask
+let geomCache = null;    // tablegeom.buildTable() for the current mode
 
 function loadPref() {
   try { return localStorage.getItem(KEY) !== 'classic'; } catch (_) { return true; }
@@ -80,15 +80,12 @@ export function install() {
   };
 }
 
-// ─── table geometry (cushion segments from the collision mask) ──────────────────────────
+// ─── table geometry (cushion segments + pocket holes, shared with the 3D view) ────────────
 function geometry() {
-  const key = (gameMode === 'snooker' ? 'snooker' : 'pool') + TW;
-  if (geomCache && geomCache.key === key) return geomCache;
-  const t = traceTable({
-    w: TW, h: TH, cushionWidth: Math.max(7, BALL_R * 1.1),
-    cell: (x, y) => (maskIs(x, y, 0) ? PLAY : maskIs(x, y, 2) ? POCKET : RAIL),
-  });
-  geomCache = { key, segs: t.segs };
+  const mode = gameMode === 'snooker' ? 'snooker' : 'pool';
+  if (!geomCache || geomCache.mode !== mode || geomCache.TW !== TW) {
+    geomCache = buildTable({ mode, TW, TH, R: BALL_R });
+  }
   return geomCache;
 }
 
@@ -105,6 +102,7 @@ function startReal(cx, cy, pwr) {
   const P = {
     R, s, g: G * s,
     musp: MU_SP_PER_R * Rm,
+    table: geometry(),
     segs: geometry().segs,
     dt: FRAME / SUBSTEPS,
     t: 0,
@@ -163,7 +161,7 @@ function stepReal() {
     }
     collideBalls(st, P);
     collideCushions(st, P);
-    checkPockets(st);
+    checkPockets(st, P);
     P.t += P.dt;
   }
   advanceFall();
@@ -338,18 +336,19 @@ function hanCushion(k, nx, ny, R) {
   k.wx = wx * nx - wy * ny; k.wy = wx * ny + wy * nx; k.wz = wz;
 }
 
-// A ball drops once its centre is over the pocket (same rule as the classic engine's
-// centre probe), then plays the classic fall animation (b.fp → PCAPT).
-function checkPockets(st) {
+// A ball drops once its centre is over a pocket hole, then plays the classic fall
+// animation (b.fp → PCAPT) toward the hole centre.
+function checkPockets(st, P) {
   for (let i = 0; i < st.length; i++) {
     const b = balls[i], k = st[i];
     if (!b.active || b.falling) continue;
     const x = k.x, y = -k.y;
-    if (!maskIs(x, y, 2)) continue;
-    const pi = nearPocket(x, y);
+    const pi = pocketAt(P.table, x, y);
+    if (pi < 0) continue;
+    const pk = P.table.pockets[pi];
     b.x = x; b.y = y;
     b.falling = true; b.fp = 0.01; b.vx = b.vy = 0;
-    b.fpx = PX[pi]; b.fpy = PY[pi];
+    b.fpx = pk.x; b.fpy = pk.y;
     k.vx = k.vy = k.wx = k.wy = k.wz = 0;
     Sound.pocket();
     if (i === 0) cueScratch = true;
